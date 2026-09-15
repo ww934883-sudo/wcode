@@ -20,6 +20,7 @@ import {
 } from "@wcode/core";
 import { FakeProvider, RecordingHost, endTurn, toolUseTurn } from "@wcode/core/testing";
 import { bootstrap } from "./bootstrap";
+import { mapSlashCommand } from "./slash";
 import { InkHost } from "./ui/ink-host";
 import { App } from "./ui/App";
 
@@ -50,18 +51,20 @@ async function main(): Promise<number> {
   const host = new InkHost();
 
   try {
-    const { session, config } = await bootstrap({ host, overrides, resume });
+    const { session, config, skills } = await bootstrap({ host, overrides, resume });
     host.pushHistory({
       kind: "welcome",
       text:
         `wcode 已就绪 — provider=${config.activeProvider} model=${config.model}` +
-        `（权限模式 ${config.permissions.mode}${resume ? "，已恢复上一会话" : ""}）`,
+        `（权限模式 ${config.permissions.mode}${resume ? "，已恢复上一会话" : ""}` +
+        `${skills.length > 0 ? `，技能 ${skills.map((s) => `/${s.name}`).join(" ")}` : ""}）`,
     });
 
     const app = render(
       <App
         host={host}
-        onSubmit={async (text) => {
+        onSubmit={async (raw) => {
+          const text = mapSlashCommand(raw, skills);
           try {
             const result = await session.run(text);
             if (result.status === "max_turns") {

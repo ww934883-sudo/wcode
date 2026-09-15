@@ -8,10 +8,12 @@ import { truncateOutput } from "./truncate";
 import type { ToolContext } from "./tool";
 import type { ToolRegistry } from "./registry";
 
-/** M4 Hooks 预留位：返回 block=true 阻断本次工具调用 */
+/** M2 Hooks：返回 block=true 阻断本次工具调用（exit-2 语义） */
 export type HookFn = (info: {
   toolName: string;
   input: unknown;
+  /** 会话中断信号：hook 执行期间用户中止时尽快退出 */
+  signal?: AbortSignal;
 }) => Promise<{ block: boolean; reason?: string } | void>;
 
 export interface ToolExecutorOptions {
@@ -55,6 +57,7 @@ export class ToolExecutor {
         const hooked = await this.opts.hookPre({
           toolName: call.name,
           input: call.input,
+          signal: ctx?.signal,
         });
         if (hooked?.block) {
           return fail(`被 PreToolUse Hook 阻断: ${hooked.reason ?? "无理由"}`);
@@ -123,7 +126,11 @@ export class ToolExecutor {
       });
       this.emitEnd(call, true, text, startedAt);
       if (this.opts.hookPost) {
-        await this.opts.hookPost({ toolName: call.name, input: parsed.data });
+        await this.opts.hookPost({
+          toolName: call.name,
+          input: parsed.data,
+          signal: ctx?.signal,
+        });
       }
       return {
         callId: call.id,

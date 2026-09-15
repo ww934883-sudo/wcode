@@ -2,7 +2,7 @@ import type { Message, ToolCall, ToolResultBlock } from "../types";
 import type { ModelProvider, ModelRequest, ModelResponse } from "../model/port";
 import type { AgentHost, AgentEvent, PermissionDecision, PermissionRequest } from "../host/port";
 import { ToolRegistry, sourceOf } from "../tools/registry";
-import { ToolExecutor } from "../tools/pipeline";
+import { ToolExecutor, type HookFn } from "../tools/pipeline";
 import type { ToolContext } from "../tools/tool";
 import type { SubAgentTask } from "../tools/builtin/task";
 import { PermissionEngine } from "../permission/engine";
@@ -26,6 +26,9 @@ import {
   MAX_TURNS_DEFAULT,
   sleepInterruptible,
 } from "./retry";
+import { runHooks } from "../hooks/hooks";
+import type { HooksConfig } from "../config/schema";
+import type { CustomAgentDef } from "../agents/defs";
 
 export interface AgentSessionOptions {
   provider: ModelProvider;
@@ -48,6 +51,10 @@ export interface AgentSessionOptions {
   bashTimeoutMs?: number;
   /** 会话恢复：重放的既有消息历史 */
   initialMessages?: Message[];
+  /** lifecycle hooks 配置（M2）：pre/post 工具事件注入工具管道 */
+  hooks?: HooksConfig;
+  /** 自定义子 Agent 定义（M2）：task 工具按 subagent 名解析 */
+  customAgents?: CustomAgentDef[];
 }
 
 export interface RunResult {
@@ -78,6 +85,8 @@ export class AgentSession {
   private readonly bashTimeoutMs?: number;
   private readonly engine: PermissionEngine;
   private readonly log: Logger;
+  private readonly hooks?: HooksConfig;
+  private readonly customAgents: CustomAgentDef[];
   private abortController?: AbortController;
 
   constructor(opts: AgentSessionOptions) {
@@ -94,6 +103,8 @@ export class AgentSession {
     this.bashTimeoutMs = opts.bashTimeoutMs;
     this.log = opts.log ?? createFileLogger();
     this.store = opts.store;
+    this.hooks = opts.hooks;
+    this.customAgents = opts.customAgents ?? [];
     this.state = createSessionState(opts.cwd);
     if (opts.initialMessages && opts.initialMessages.length > 0) {
       this.state.messages = [...opts.initialMessages];
@@ -103,7 +114,32 @@ export class AgentSession {
       engine: opts.engine,
       log: this.log,
       maxOutputChars: this.maxOutputChars,
+      hookPre: this.makeHookFn("pre_tool_use"),
+      hookPost: this.makeHookFn("post_tool_use"),
     });
+  }
+
+  /** hooks 配置 → 工具管道 HookFn；未配置对应事件时返回 undefined（零开销） */
+  private makeHookFn(event: "pre_tool_use" | "post_tool_use"): HookFn | undefined {
+    const hooks = this.hooks;
+    if (!hooks) return undefined;
+    const defs = event === "pre_tool_use" ? hooks.preToolUse : hooks.postToolUse;
+    if (defs.length === 0) return undefined;
+    return async ({ toolName, input, signal }) => {
+      const outcome = await runHooks(
+        event,
+        hooks,
+        { toolName, toolInput: input, cwd: this.state.cwd },
+        { cwd: this.state.cwd, signal },
+      );
+      for (const notice of outcome.notices) {
+        this.log.warn("hook.notice", { event, tool: toolName, notice });
+      }
+      if (outcome.blocked !== undefined) {
+        return { block: true, reason: outcome.blocked };
+      }
+      return undefined;
+    };
   }
 
   abort(): void {
@@ -274,15 +310,40 @@ export class AgentSession {
   /**
    * 子 Agent（架构文档 §2.8 扩展点）：全新消息数组 + 工具子集 + 继承权限引擎，
    * 只把最终文本返回主对话。子 Agent 不再派生（防止递归），轮数上限更低。
+   * M2：subagent 名命中自定义定义时，用其正文作 system prompt、按定义收敛工具集。
    */
   private async runSubAgent(task: SubAgentTask): Promise<string> {
-    const childTools = this.registry
-      .list()
-      .filter((t) =>
-        task.tools === "all" ? t.name !== "task" : t.isReadOnly && t.name !== "task",
-      );
+    const custom = task.subagent
+      ? this.customAgents.find((a) => a.name === task.subagent)
+      : undefined;
+    if (task.subagent && !custom) {
+      const catalog =
+        this.customAgents
+          .map((a) => `${a.name}（${a.description}）`)
+          .join("；") || "（当前没有自定义子 Agent 定义）";
+      return `未知子 Agent "${task.subagent}"。可用子 Agent: ${catalog}。请从列表中选择，或去掉 subagent 参数使用默认子 Agent。`;
+    }
+
+    const all = this.registry.list();
+    let childTools = all.filter((t) =>
+      task.tools === "all" ? t.name !== "task" : t.isReadOnly && t.name !== "task",
+    );
+    if (custom && Array.isArray(custom.tools)) {
+      // 按定义收敛到指定工具名；task 一律剔除（防递归），未知名静默丢弃
+      const wanted = new Set(custom.tools);
+      childTools = all.filter((t) => wanted.has(t.name) && t.name !== "task");
+    }
     const childRegistry = new ToolRegistry();
     await childRegistry.registerSource(sourceOf("subagent", childTools));
+
+    const system = custom
+      ? `你是「${custom.name}」子 Agent。${custom.body}\n\n` +
+        "当前任务：\n\n" +
+        `${task.prompt}\n\n` +
+        "完成后用简洁文本汇报结论（主 Agent 只能看到这段汇报，看不到你的执行过程）。"
+      : "你是被主 Agent 派出的子 Agent，专注完成以下任务：\n\n" +
+        `${task.prompt}\n\n` +
+        "完成后用简洁文本汇报结论（主 Agent 只能看到这段汇报，看不到你的执行过程）。";
 
     const childSession = new AgentSession({
       provider: this.provider,
@@ -303,10 +364,7 @@ export class AgentSession {
         requestPermission: (req) => this.host.requestPermission(req),
       },
       engine: this.engine,
-      system:
-        "你是被主 Agent 派出的子 Agent，专注完成以下任务：\n\n" +
-        `${task.prompt}\n\n` +
-        "完成后用简洁文本汇报结论（主 Agent 只能看到这段汇报，看不到你的执行过程）。",
+      system,
       cwd: this.state.cwd,
       maxTurns: 25,
       retryDelaysMs: this.retryDelaysMs,
@@ -314,6 +372,8 @@ export class AgentSession {
       maxContextTokens: this.maxContextTokens,
       compactThreshold: this.compactThreshold,
       bashTimeoutMs: this.bashTimeoutMs,
+      // hooks 对子 Agent 同样生效（护栏不应被子任务绕过）
+      hooks: this.hooks,
     });
     const result = await childSession.run(task.prompt);
     return result.reply || "(子 Agent 无输出)";

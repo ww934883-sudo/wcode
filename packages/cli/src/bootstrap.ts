@@ -8,11 +8,14 @@ import {
   PermissionEngine,
   ToolRegistry,
   buildSystemPrompt,
-  builtinToolSource,
+  createBuiltinToolSource,
   createFileLogger,
   createAgentsMdSection,
   createMcpToolSource,
+  createSkillsSection,
   defaultPromptSections,
+  discoverAgents,
+  discoverSkills,
   errorMessage,
   findLatestSessionFile,
   loadAgentsMdFiles,
@@ -21,12 +24,14 @@ import {
   parseLogLevel,
   parseRuleString,
   projectDirHash,
+  runHooks,
   type WcodeConfig,
   type Logger,
   type Message,
   type ModelProvider,
   type AgentHost,
   type PromptSection,
+  type SkillDefinition,
 } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
 
@@ -63,6 +68,8 @@ export interface Bootstrap {
   session: AgentSession;
   config: WcodeConfig;
   log: Logger;
+  /** 已发现的技能（供 UI 层做 /技能名 映射） */
+  skills: SkillDefinition[];
 }
 
 export async function bootstrap(options: {
@@ -87,8 +94,19 @@ export async function bootstrap(options: {
   const provider =
     options.provider ?? (await createProvider(config));
 
+  // Skills / 自定义子 Agent：用户级 + 项目级发现，非法条目降级跳过。
+  // 内置工具源统一由工厂创建（有技能时才注册 skill 工具，task 工具带子 Agent 目录）
+  const [skillsRes, agentsRes] = await Promise.all([
+    discoverSkills({ cwd }),
+    discoverAgents({ cwd }),
+  ]);
+  for (const problem of [...skillsRes.problems, ...agentsRes.problems]) {
+    log.warn("discover.problem", { problem });
+  }
   const registry = new ToolRegistry();
-  await registry.registerSource(builtinToolSource);
+  await registry.registerSource(
+    createBuiltinToolSource({ skills: skillsRes.items, agents: agentsRes.items }),
+  );
 
   // MCP servers：连接失败降级跳过，不阻塞启动（架构文档 §11）
   for (const [name, cfg] of Object.entries(config.mcpServers ?? {})) {
@@ -138,13 +156,25 @@ export async function bootstrap(options: {
       .catch(() => {});
   }
 
-  // 项目记忆：AGENTS.md（兼容 CLAUDE.md）→ PromptSection
+  // 项目记忆 + 技能清单：AGENTS.md（兼容 CLAUDE.md）/ Skills → PromptSection
   const agentsMd = await loadAgentsMdFiles({ cwd });
   const agentsMdSection = createAgentsMdSection(agentsMd);
+  const skillsSection = createSkillsSection(skillsRes.items);
   const sections: PromptSection[] = [
     ...defaultPromptSections,
     ...(agentsMdSection ? [agentsMdSection] : []),
+    ...(skillsSection ? [skillsSection] : []),
   ];
+
+  // session_start hooks：失败/超时降级为日志，不阻塞启动
+  if (config.hooks.sessionStart.length > 0) {
+    try {
+      const outcome = await runHooks("session_start", config.hooks, { cwd }, { cwd });
+      for (const notice of outcome.notices) log.warn("hook.notice", { event: "session_start", notice });
+    } catch (err) {
+      log.warn("hook.notice", { event: "session_start", error: errorMessage(err) });
+    }
+  }
 
   const session = new AgentSession({
     provider,
@@ -162,7 +192,9 @@ export async function bootstrap(options: {
     maxContextTokens: config.context.maxContextTokens,
     compactThreshold: config.context.compactThreshold,
     initialMessages,
+    hooks: config.hooks,
+    customAgents: agentsRes.items,
   });
 
-  return { session, config, log };
+  return { session, config, log, skills: skillsRes.items };
 }

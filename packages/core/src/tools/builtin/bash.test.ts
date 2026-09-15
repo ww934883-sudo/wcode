@@ -25,7 +25,7 @@ describe("bash 工具", () => {
       expect(out.content).toContain("hello");
       expect(out.content).toMatch(/退出码 0/);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await cleanupDir(dir);
     }
   });
 
@@ -35,7 +35,7 @@ describe("bash 工具", () => {
       const out = await bashTool.execute({ command: "exit 3" }, ctx(dir));
       expect(out.content).toMatch(/退出码 3/);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await cleanupDir(dir);
     }
   });
 
@@ -47,7 +47,7 @@ describe("bash 工具", () => {
       const out = await bashTool.execute({ command: "cat marker.txt" }, ctx(dir));
       expect(out.content).toContain("cwd-marker-42");
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await cleanupDir(dir);
     }
   });
 
@@ -63,7 +63,7 @@ describe("bash 工具", () => {
       expect(elapsed).toBeLessThan(4000);
       expect(out.content).toContain("超时");
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await cleanupDir(dir);
     }
   });
 
@@ -87,7 +87,7 @@ describe("bash 工具", () => {
       expect(result.content).toContain("已完成");
       expect(result.content).toContain("bg-output-42");
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await cleanupDir(dir);
     }
   });
 
@@ -115,7 +115,7 @@ describe("bash 工具", () => {
       const out = await taskOutputTool.execute({ task_id: "t-none" }, ctx(dir));
       expect(out.content).toContain("任务不存在");
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await cleanupDir(dir);
     }
   });
 });

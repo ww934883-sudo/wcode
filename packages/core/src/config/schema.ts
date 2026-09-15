@@ -7,6 +7,24 @@ export const permissionModeSchema = z.enum([
   "bypass",
 ]);
 
+/** lifecycle hook 定义：command 从 stdin 收 JSON payload（hooks/hooks.ts） */
+export const hookDefSchema = z.object({
+  /** 工具名过滤（正则字符串，如 "write|edit"）；缺省匹配全部。仅工具事件有效 */
+  matcher: z.string().optional(),
+  command: z.string().min(1),
+});
+
+export const hooksSchema = z.object({
+  /** 单个 hook 进程超时 */
+  timeoutMs: z.number().int().positive().default(30_000),
+  sessionStart: z.array(hookDefSchema).default([]),
+  preToolUse: z.array(hookDefSchema).default([]),
+  postToolUse: z.array(hookDefSchema).default([]),
+});
+
+export type HooksConfig = z.infer<typeof hooksSchema>;
+export type HookDef = z.infer<typeof hookDefSchema>;
+
 export const configSchema = z.object({
   /** 当前激活的 provider 键（providers 的 key） */
   activeProvider: z.string().default("anthropic"),
@@ -65,6 +83,8 @@ export const configSchema = z.object({
       }),
     )
     .default({}),
+  /** lifecycle hooks（M2）：见 hooksSchema */
+  hooks: hooksSchema.default({ timeoutMs: 30_000, sessionStart: [], preToolUse: [], postToolUse: [] }),
 });
 
 export type WcodeConfig = z.infer<typeof configSchema>;
