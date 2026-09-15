@@ -1,0 +1,21 @@
+{
+  "name": "wcode-monorepo",
+  "private": true,
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/provider-anthropic/tsconfig.json && tsc -p packages/cli/tsconfig.json",
+    "lint:deps": "dependency-cruise --config .dependency-cruiser.cjs packages",
+    "dev": "pnpm --filter @wcode/cli dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "dependency-cruiser": "^16.8.1",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}

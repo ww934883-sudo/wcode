@@ -1,0 +1,20 @@
+{
+  "name": "@wcode/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "wcode": "./src/bin.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/bin.ts",
+    "selftest": "tsx src/bin.ts --selftest"
+  },
+  "dependencies": {
+    "@wcode/core": "workspace:*",
+    "@wcode/provider-anthropic": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
