@@ -81,23 +81,32 @@ async function runForeground(
   cappedStream(child.stderr, stderr);
 
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    killTree(child);
-  }, timeoutMs);
-  const onAbort = () => killTree(child);
-  if (signal.aborted) onAbort();
-  else signal.addEventListener("abort", onAbort, { once: true });
+  const exitCode = await new Promise<number>((resolvePromise) => {
+    let settled = false;
+    let grace: NodeJS.Timeout | undefined;
+    const settle = (code: number): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (grace) clearTimeout(grace);
+      signal.removeEventListener("abort", onAbort);
+      resolvePromise(code);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree(child);
+      // 被杀进程树的孤儿可能短暂占住 stdio 管道：宽限期后强制结算
+      grace = setTimeout(() => settle(-1), 1500);
+    }, timeoutMs);
+    const onAbort = (): void => {
+      killTree(child);
+      grace = setTimeout(() => settle(-1), 1500);
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
 
-  const exitCode = await new Promise<number>((resolve2) => {
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      resolve2(code ?? -1);
-    });
+    child.on("close", (code) => settle(code ?? -1));
     child.on("error", (err) => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
       // bash 不在 PATH（Windows）：换 PowerShell 重试一次
       if (
         (err as NodeJS.ErrnoException).code === "ENOENT" &&
@@ -117,13 +126,13 @@ async function runForeground(
         retry.on("close", (code) => {
           stdout.text = retryOut.text;
           stderr.text = retryErr.text;
-          resolve2(code ?? -1);
+          settle(code ?? -1);
         });
-        retry.on("error", () => resolve2(-1));
+        retry.on("error", () => settle(-1));
         return;
       }
       stderr.text += `\n[spawn error] ${String(err)}`;
-      resolve2(-1);
+      settle(-1);
     });
   });
 

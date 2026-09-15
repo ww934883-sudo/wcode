@@ -33,8 +33,8 @@ module.exports = {
       name: "cli-ui-contained",
       severity: "error",
       comment:
-        "TUI 代码必须收在 cli/src/ui 内；唯一例外是组合根 bin.ts（装配 AgentHost）",
-      from: { path: "^packages/cli/src/", pathNot: "^packages/cli/src/bin\\.ts$" },
+        "TUI 代码必须收在 cli/src/ui 内；例外：组合根 bin.tsx 与 ui 目录内部互引",
+      from: { path: "^packages/cli/src/", pathNot: "^(packages/cli/src/bin\\.tsx|packages/cli/src/ui/)" },
       to: { path: "^packages/cli/src/ui/" },
     },
   ],

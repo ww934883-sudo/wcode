@@ -4,17 +4,21 @@
   "private": true,
   "type": "module",
   "bin": {
-    "wcode": "./src/bin.ts"
+    "wcode": "./src/bin.tsx"
   },
   "scripts": {
-    "dev": "tsx src/bin.ts",
-    "selftest": "tsx src/bin.ts --selftest"
+    "dev": "tsx src/bin.tsx",
+    "selftest": "tsx src/bin.tsx --selftest",
+    "smoke-ui": "WCODE_UI_SMOKE=1 tsx src/bin.tsx"
   },
   "dependencies": {
     "@wcode/core": "workspace:*",
-    "@wcode/provider-anthropic": "workspace:*"
+    "@wcode/provider-anthropic": "workspace:*",
+    "ink": "^5",
+    "react": "^18"
   },
   "devDependencies": {
+    "@types/react": "^18",
     "tsx": "^4.19.2"
   }
 }

@@ -76,8 +76,17 @@ pnpm dev -- --mode=acceptEdits
 - provider-anthropic（SSE 流解析、tool_use 增量拼接、图像块映射、错误分类）
 - JSONL 会话持久化、脱敏日志、分层配置、readline REPL
 
-测试与门禁：106 用例全绿；dependency-cruiser 依赖单向门禁；四包严格 TS；
-`wcode --selftest` 无网络自检。
+测试与门禁：114 用例全绿；dependency-cruiser 依赖单向门禁；四包严格 TS；
+`wcode --selftest` 无网络自检；`pnpm --filter @wcode/cli smoke-ui` UI 渲染管线冒烟。
+
+## TUI（ink 组件化）
+
+cli/src/ui 为 ink + React 实现：已完成内容走 `<Static>` 进终端回滚区
+（用户/助手消息、工具行、todo 快照、用量），底部动态区渲染流式 markdown
+（标题/列表/代码块/行内码）、运行中工具、任务清单与权限弹窗。
+权限弹窗展示 edit/write 的着色 diff（y/a/n/Esc 决策）；输入框支持历史上下翻；
+Ctrl+C 中断任务、两秒内再按退出。markdown 与 diff 为纯函数模块（有单测），
+InkHost 是 AgentHost 的第二个实现（接缝三），core 零改动。
 
 ## 评测集（真实任务基线）
 
