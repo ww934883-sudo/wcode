@@ -2,10 +2,16 @@ import { errorMessage, isAbortedError } from "@wcode/core";
 import type {
   AgentHost,
   AgentSession,
+  Logger,
   ModelProvider,
   ModelRequest,
   SkillDefinition,
   WcodeConfig,
+} from "@wcode/core";
+import {
+  JsonlSessionStore,
+  listSessions,
+  messagesFromSessionLines,
 } from "@wcode/core";
 import { mapSlashCommand } from "./slash";
 
@@ -31,6 +37,16 @@ export interface CommandDeps {
   host: AgentHost;
   /** /btw 的中断控制器；Ctrl+C 时由 bin 一并 abort */
   btwAbort: { current: AbortController | null };
+  /** /reload：重建运行时快照（配置/技能/子 Agent/注册表/权限引擎/系统提示） */
+  reloadRuntime(): Promise<{
+    config: WcodeConfig;
+    skills: SkillDefinition[];
+    problems: string[];
+  }>;
+  /** /resume：会话记录目录 */
+  sessionsDir: string;
+  /** /resume 打开会话 store 需要 */
+  log: Logger;
 }
 
 export type SlashOutcome =
@@ -48,6 +64,8 @@ const HELP_TEXT = [
   "- **/btw** <问题> — 顺带一问：单轮直答，不进入任务上下文",
   "- **/compact** — 立即压缩上下文（结构化摘要 + 最近消息）",
   "- **/goal** [目标] — 查看/设定任务目标（压缩后依然有效）；**/goal clear** 清除",
+  "- **/reload** — 热重载配置、权限规则、hooks、技能与子 Agent 定义（无需重启）",
+  "- **/resume** [序号] — 列出并恢复历史会话",
   "- **/quit**、**/exit** — 退出 wcode",
   "",
   "内置命令优先于同名技能。",
@@ -215,6 +233,64 @@ export async function handleSlashCommand(
       }
       deps.session.setGoal(args);
       sink.note(`已设定目标（压缩上下文后依然有效）：\n${args}`);
+      return { kind: "handled" };
+    }
+
+    case "reload": {
+      try {
+        const snap = await deps.reloadRuntime();
+        // 后续命令（/skill、/model 等）使用重载后的配置与技能
+        deps.config = snap.config;
+        deps.skills = snap.skills;
+        const warnings =
+          snap.problems.length > 0 ? `；警告: ${snap.problems.join("；")}` : "";
+        sink.note(
+          `已热重载：配置、权限规则、hooks、技能（${snap.skills.length} 个）、子 Agent 定义。` +
+            "provider 与 MCP 连接保持不变" + warnings,
+        );
+      } catch (err) {
+        sink.error(`重载失败: ${errorMessage(err)}`);
+      }
+      return { kind: "handled" };
+    }
+
+    case "resume": {
+      const sessions = await listSessions(deps.sessionsDir);
+      if (sessions.length === 0) {
+        sink.note("该目录下没有历史会话记录。");
+        return { kind: "handled" };
+      }
+      if (!args) {
+        const lines = sessions.map(
+          (s, i) =>
+            `${i + 1}. ${s.sessionId} · ${s.messageCount} 条消息 · ${s.preview || "（无预览）"}`,
+        );
+        sink.assistant(
+          `最近的会话（/resume <序号> 恢复，当前会话也在列表中）：\n\n${lines.join("\n")}`,
+        );
+        return { kind: "handled" };
+      }
+      const idx = Number.parseInt(args, 10);
+      if (!Number.isInteger(idx) || idx < 1 || idx > sessions.length) {
+        sink.error(`序号需为 1-${sessions.length}。直接输入 /resume 查看列表。`);
+        return { kind: "handled" };
+      }
+      const target = sessions[idx - 1];
+      if (!target) {
+        sink.error(`序号需为 1-${sessions.length}。直接输入 /resume 查看列表。`);
+        return { kind: "handled" };
+      }
+      try {
+        const store = new JsonlSessionStore(target.file, deps.log);
+        const messages = messagesFromSessionLines(await store.load());
+        deps.session.applyResume(store, messages);
+        sink.note(
+          `已恢复会话 ${target.sessionId}（${messages.length} 条消息）。` +
+            "后续对话将写入该会话记录；当前会话的内容仍保留在其原记录文件中。",
+        );
+      } catch (err) {
+        sink.error(`恢复会话失败: ${errorMessage(err)}`);
+      }
       return { kind: "handled" };
     }
 

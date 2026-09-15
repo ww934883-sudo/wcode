@@ -12,8 +12,10 @@ export interface ToolSource {
 
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: Tool; sourceId: string }>();
+  private readonly sources: ToolSource[] = [];
 
   async registerSource(source: ToolSource): Promise<void> {
+    this.sources.push(source);
     for (const tool of await source.listTools()) {
       const existing = this.tools.get(tool.name);
       if (existing) {
@@ -23,6 +25,11 @@ export class ToolRegistry {
       }
       this.tools.set(tool.name, { tool, sourceId: source.id });
     }
+  }
+
+  /** 已注册的 source 列表（/reload 迁移 MCP 等外部连接时用） */
+  sourcesOf(): ToolSource[] {
+    return [...this.sources];
   }
 
   list(): Tool[] {

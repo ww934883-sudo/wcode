@@ -26,12 +26,14 @@ import {
   projectDirHash,
   runHooks,
   type WcodeConfig,
+  type CustomAgentDef,
   type Logger,
   type Message,
   type ModelProvider,
   type AgentHost,
   type PromptSection,
   type SkillDefinition,
+  type ToolSource,
 } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
 
@@ -64,6 +66,95 @@ export async function createProvider(
   });
 }
 
+export interface RuntimeSnapshot {
+  config: WcodeConfig;
+  registry: ToolRegistry;
+  engine: PermissionEngine;
+  system: string;
+  skills: SkillDefinition[];
+  customAgents: CustomAgentDef[];
+  /** 非致命问题（非法技能/子 Agent 定义等），已跳过对应条目 */
+  problems: string[];
+}
+
+/**
+ * 装配运行时快照：加载配置 → 发现 skills/agents → 组装工具注册表/权限引擎/系统提示。
+ * bootstrap（启动）与 /reload（热更新）共用；变更这些文件后无需重启。
+ */
+export async function refreshRuntime(opts: {
+  cwd: string;
+  log: Logger;
+  /** CLI 层覆盖（如 --mode），/reload 时必须透传保持一致 */
+  overrides?: Record<string, unknown>;
+  /** 已加载的配置（bootstrap 传入避免重复读盘）；/reload 省略即重新读 */
+  config?: WcodeConfig;
+  /** /reload 时复用旧注册表的非内置 source（MCP 连接不重建） */
+  carryOverSources?: ToolSource[];
+}): Promise<RuntimeSnapshot> {
+  const config = opts.config ?? (await loadConfig({ overrides: opts.overrides, cwd: opts.cwd }));
+
+  const [skillsRes, agentsRes] = await Promise.all([
+    discoverSkills({ cwd: opts.cwd }),
+    discoverAgents({ cwd: opts.cwd }),
+  ]);
+  for (const problem of [...skillsRes.problems, ...agentsRes.problems]) {
+    opts.log.warn("discover.problem", { problem });
+  }
+
+  // 内置工具源统一由工厂创建（有技能时才注册 skill 工具，task 工具带子 Agent 目录）
+  const registry = new ToolRegistry();
+  await registry.registerSource(
+    createBuiltinToolSource({ skills: skillsRes.items, agents: agentsRes.items }),
+  );
+  // /reload：迁移旧注册表的非内置 source（MCP 连接保持存活，避免重建子进程）
+  for (const source of opts.carryOverSources ?? []) {
+    await registry.registerSource(source);
+  }
+
+  // MCP servers：连接失败降级跳过，不阻塞启动（架构文档 §11）
+  for (const [name, cfg] of Object.entries(config.mcpServers ?? {})) {
+    try {
+      registry.registerSource(await createMcpToolSource(name, cfg));
+      opts.log.info("mcp.connected", { server: name });
+    } catch (err) {
+      opts.log.warn("mcp.connect-failed", { server: name, error: errorMessage(err) });
+    }
+  }
+
+  const rules = [
+    ...config.permissions.allow.map((s) => parseRuleString(s, "allow", "config")),
+    ...config.permissions.deny.map((s) => parseRuleString(s, "deny", "config")),
+  ];
+  const engine = new PermissionEngine({
+    rules,
+    mode: config.permissions.mode,
+  });
+
+  // 项目记忆 + 技能清单：AGENTS.md（兼容 CLAUDE.md）/ Skills → PromptSection
+  const agentsMd = await loadAgentsMdFiles({ cwd: opts.cwd });
+  const agentsMdSection = createAgentsMdSection(agentsMd);
+  const skillsSection = createSkillsSection(skillsRes.items);
+  const sections: PromptSection[] = [
+    ...defaultPromptSections,
+    ...(agentsMdSection ? [agentsMdSection] : []),
+    ...(skillsSection ? [skillsSection] : []),
+  ];
+  const system = buildSystemPrompt(sections, {
+    cwd: opts.cwd,
+    platform: process.platform,
+  });
+
+  return {
+    config,
+    registry,
+    engine,
+    system,
+    skills: skillsRes.items,
+    customAgents: agentsRes.items,
+    problems: [...skillsRes.problems, ...agentsRes.problems],
+  };
+}
+
 export interface Bootstrap {
   session: AgentSession;
   config: WcodeConfig;
@@ -72,6 +163,14 @@ export interface Bootstrap {
   provider: ModelProvider;
   /** 已发现的技能（供 UI 层做 /技能名 映射） */
   skills: SkillDefinition[];
+  /** 会话工作目录（/reload 用） */
+  cwd: string;
+  /** 会话记录目录（/resume 列表用） */
+  sessionsDir: string;
+  /** 当前工具注册表（/reload 迁移 MCP source 用） */
+  registry: ToolRegistry;
+  /** CLI 层覆盖（/reload 透传） */
+  overrides?: Record<string, unknown>;
 }
 
 export async function bootstrap(options: {
@@ -93,41 +192,11 @@ export async function bootstrap(options: {
     level: parseLogLevel(process.env.WCODE_LOG) ?? config.log.level,
   });
 
+  const snap = await refreshRuntime({ cwd, log, overrides: options.overrides, config });
+  const { registry, engine, system } = snap;
+
   const provider =
-    options.provider ?? (await createProvider(config));
-
-  // Skills / 自定义子 Agent：用户级 + 项目级发现，非法条目降级跳过。
-  // 内置工具源统一由工厂创建（有技能时才注册 skill 工具，task 工具带子 Agent 目录）
-  const [skillsRes, agentsRes] = await Promise.all([
-    discoverSkills({ cwd }),
-    discoverAgents({ cwd }),
-  ]);
-  for (const problem of [...skillsRes.problems, ...agentsRes.problems]) {
-    log.warn("discover.problem", { problem });
-  }
-  const registry = new ToolRegistry();
-  await registry.registerSource(
-    createBuiltinToolSource({ skills: skillsRes.items, agents: agentsRes.items }),
-  );
-
-  // MCP servers：连接失败降级跳过，不阻塞启动（架构文档 §11）
-  for (const [name, cfg] of Object.entries(config.mcpServers ?? {})) {
-    try {
-      registry.registerSource(await createMcpToolSource(name, cfg));
-      log.info("mcp.connected", { server: name });
-    } catch (err) {
-      log.warn("mcp.connect-failed", { server: name, error: errorMessage(err) });
-    }
-  }
-
-  const rules = [
-    ...config.permissions.allow.map((s) => parseRuleString(s, "allow", "config")),
-    ...config.permissions.deny.map((s) => parseRuleString(s, "deny", "config")),
-  ];
-  const engine = new PermissionEngine({
-    rules,
-    mode: config.permissions.mode,
-  });
+    options.provider ?? (await createProvider(snap.config));
 
   // 会话持久化 / 恢复：~/.wcode/projects/<路径哈希>/<时间戳>.jsonl
   const sessionsDir = join(
@@ -158,20 +227,10 @@ export async function bootstrap(options: {
       .catch(() => {});
   }
 
-  // 项目记忆 + 技能清单：AGENTS.md（兼容 CLAUDE.md）/ Skills → PromptSection
-  const agentsMd = await loadAgentsMdFiles({ cwd });
-  const agentsMdSection = createAgentsMdSection(agentsMd);
-  const skillsSection = createSkillsSection(skillsRes.items);
-  const sections: PromptSection[] = [
-    ...defaultPromptSections,
-    ...(agentsMdSection ? [agentsMdSection] : []),
-    ...(skillsSection ? [skillsSection] : []),
-  ];
-
   // session_start hooks：失败/超时降级为日志，不阻塞启动
-  if (config.hooks.sessionStart.length > 0) {
+  if (snap.config.hooks.sessionStart.length > 0) {
     try {
-      const outcome = await runHooks("session_start", config.hooks, { cwd }, { cwd });
+      const outcome = await runHooks("session_start", snap.config.hooks, { cwd }, { cwd });
       for (const notice of outcome.notices) log.warn("hook.notice", { event: "session_start", notice });
     } catch (err) {
       log.warn("hook.notice", { event: "session_start", error: errorMessage(err) });
@@ -183,20 +242,27 @@ export async function bootstrap(options: {
     registry,
     engine,
     host: options.host,
-    system: buildSystemPrompt(sections, {
-      cwd,
-      platform: process.platform,
-    }),
+    system,
     cwd,
     store,
     log,
-    bashTimeoutMs: config.tools.bashTimeoutMs,
-    maxContextTokens: config.context.maxContextTokens,
-    compactThreshold: config.context.compactThreshold,
+    bashTimeoutMs: snap.config.tools.bashTimeoutMs,
+    maxContextTokens: snap.config.context.maxContextTokens,
+    compactThreshold: snap.config.context.compactThreshold,
     initialMessages,
-    hooks: config.hooks,
-    customAgents: agentsRes.items,
+    hooks: snap.config.hooks,
+    customAgents: snap.customAgents,
   });
 
-  return { session, config, log, provider, skills: skillsRes.items };
+  return {
+    session,
+    config: snap.config,
+    log,
+    provider,
+    skills: snap.skills,
+    cwd,
+    sessionsDir,
+    registry,
+    overrides: options.overrides,
+  };
 }

@@ -72,22 +72,22 @@ export class AgentSession {
   readonly state: SessionState;
 
   private provider: ModelProvider;
-  private readonly registry: ToolRegistry;
+  private registry: ToolRegistry;
   private readonly host: AgentHost;
-  private readonly systemPrompt: string;
+  private systemPrompt: string;
   private goal?: string;
-  private readonly executor: ToolExecutor;
-  private readonly store?: SessionStore;
+  private executor: ToolExecutor;
+  private store?: SessionStore;
   private readonly maxTurns: number;
   private readonly maxOutputChars: number;
   private readonly retryDelaysMs: number[];
   private readonly maxContextTokens: number;
   private readonly compactThreshold: number;
-  private readonly bashTimeoutMs?: number;
-  private readonly engine: PermissionEngine;
+  private bashTimeoutMs?: number;
+  private engine: PermissionEngine;
   private readonly log: Logger;
-  private readonly hooks?: HooksConfig;
-  private readonly customAgents: CustomAgentDef[];
+  private hooks?: HooksConfig;
+  private customAgents: CustomAgentDef[];
   private abortController?: AbortController;
 
   constructor(opts: AgentSessionOptions) {
@@ -110,14 +110,52 @@ export class AgentSession {
     if (opts.initialMessages && opts.initialMessages.length > 0) {
       this.state.messages = [...opts.initialMessages];
     }
-    this.executor = new ToolExecutor(this.registry, {
-      host: opts.host,
-      engine: opts.engine,
+    this.executor = this.buildExecutor();
+  }
+
+  /** executor 持有 registry/engine/hooks 的运行时引用，任一变更都需重建 */
+  private buildExecutor(): ToolExecutor {
+    return new ToolExecutor(this.registry, {
+      host: this.host,
+      engine: this.engine,
       log: this.log,
       maxOutputChars: this.maxOutputChars,
       hookPre: this.makeHookFn("pre_tool_use"),
       hookPost: this.makeHookFn("post_tool_use"),
     });
+  }
+
+  /**
+   * /reload 热更新：替换注册表/权限引擎/系统提示/hooks/子 Agent 定义，
+   * 会话历史与运行状态保留。未提供的字段保持不变。
+   */
+  applyRuntime(opts: {
+    registry?: ToolRegistry;
+    engine?: PermissionEngine;
+    system?: string;
+    hooks?: HooksConfig;
+    customAgents?: CustomAgentDef[];
+    bashTimeoutMs?: number;
+  }): void {
+    if (opts.engine) this.engine = opts.engine;
+    if (opts.system !== undefined) this.systemPrompt = opts.system;
+    if (opts.hooks) this.hooks = opts.hooks;
+    if (opts.customAgents) this.customAgents = opts.customAgents;
+    if (opts.bashTimeoutMs !== undefined) this.bashTimeoutMs = opts.bashTimeoutMs;
+    if (opts.registry) this.registry = opts.registry;
+    this.executor = this.buildExecutor();
+  }
+
+  /**
+   * /resume：切换到既有会话（替换消息历史与持久化 store）。
+   * 当前会话本身已落盘，内存替换不丢数据；任务清单与已读文件缓存作废
+   * （新会话的 Write/Edit 过期保护需重新读取）。
+   */
+  applyResume(store: SessionStore, messages: Message[]): void {
+    this.store = store;
+    this.state.messages = [...messages];
+    this.state.todos = [];
+    this.state.filesRead = new Map();
   }
 
   /** hooks 配置 → 工具管道 HookFn；未配置对应事件时返回 undefined（零开销） */

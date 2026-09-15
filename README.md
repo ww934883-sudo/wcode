@@ -111,6 +111,8 @@ InkHost 是 AgentHost 的第二个实现（接缝三），core 零改动。
 | `/btw` <问题> | 顺带一问：单轮直答，不进入任务上下文 |
 | `/compact` | 立即压缩上下文（结构化摘要 + 最近消息） |
 | `/goal` [目标] | 查看/设定任务目标（并入 system prompt，压缩后依然有效）；`/goal clear` 清除 |
+| `/reload` | 热重载配置、权限规则、hooks、技能与子 Agent 定义（MCP 连接与 provider 保持不变） |
+| `/resume` [序号] | 列出历史会话；`/resume 2` 恢复第 2 个（当前会话也在列表中，内容已落盘不丢失） |
 | `/quit`、`/exit` | 退出 |
 
 内置命令优先于同名技能；未知命令会报错提示 `/help`。

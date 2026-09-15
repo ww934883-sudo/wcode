@@ -312,3 +312,124 @@ describe("AgentSession M2：斜杠命令接口（setProvider / goal / compactNow
     }
   });
 });
+
+describe("AgentSession M2：applyRuntime（/reload）与 applyResume（/resume）", () => {
+  it("applyRuntime 换注册表与系统提示后立即生效", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([
+        { response: toolUseTurn([{ id: "t1", name: "write", input: { file_path: "a.txt", content: "x" } }]) },
+        { response: endTurn("done") },
+      ]);
+      const registryA = new ToolRegistry();
+      await registryA.registerSource(sourceOf("builtin", [readTool]));
+      const session = new AgentSession({
+        provider,
+        registry: registryA,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys-v1",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+
+      const registryB = new ToolRegistry();
+      await registryB.registerSource(sourceOf("builtin", [writeTool]));
+      session.applyRuntime({ registry: registryB, system: "sys-v2" });
+      await session.run("写个文件");
+
+      // 新请求只带新注册表的工具，system 已更新
+      const req = provider.requests[0];
+      expect(req?.system).toBe("sys-v2");
+      expect(req?.tools.map((d) => d.name)).toEqual(["write"]);
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("applyRuntime 换 hooks 后新注册表生效（阻断规则热更新）", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([
+        { response: toolUseTurn([{ id: "t1", name: "read", input: { file_path: "a.ts" } }]) },
+        { response: endTurn("收到阻断") },
+      ]);
+      const registry = new ToolRegistry();
+      await registry.registerSource(sourceOf("builtin", [readTool]));
+      const session = new AgentSession({
+        provider,
+        registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+        hooks: hooksOf({}), // 初始无 hook
+      });
+      session.applyRuntime({
+        hooks: hooksOf({
+          preToolUse: [{ matcher: "read", command: 'node -e "process.exit(2)"' }],
+        }),
+      });
+      await session.run("读文件");
+      const toolResult = session.state.messages.find((m) => m.role === "tool_result");
+      const blocked = toolResult?.role === "tool_result" ? toolResult.results[0] : undefined;
+      expect(blocked?.isError).toBe(true);
+      expect(blocked?.content).toContain("阻断");
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("applyResume 替换消息历史与 store，作废 todos/filesRead", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([{ response: endTurn("回答") }]);
+      const registry = new ToolRegistry();
+      await registry.registerSource(sourceOf("builtin", [readTool]));
+      const session = new AgentSession({
+        provider,
+        registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      await session.run("当前会话");
+      session.state.todos.push({ content: "旧清单", status: "in_progress" });
+      session.state.filesRead.set("f", "hash");
+
+      const lines = [
+        { v: 1, type: "meta", sessionId: "s", createdAt: "t", cwd: t.dir },
+        { v: 1, type: "message", message: { role: "user", content: "历史会话的问题" } },
+      ] as const;
+      const fakeStore = {
+        append: async () => {},
+        load: async () => [...lines],
+      };
+      session.applyResume(
+        fakeStore,
+        lines
+          .filter((l): l is Extract<(typeof lines)[number], { type: "message" }> => l.type === "message")
+          .map((l) => l.message),
+      );
+      expect(session.state.messages).toHaveLength(1);
+      const first = session.state.messages[0];
+      expect(first?.role === "user" && first.content).toBe("历史会话的问题");
+      expect(session.state.todos).toHaveLength(0);
+      expect(session.state.filesRead.size).toBe(0);
+
+      // 后续消息写入新 store
+      const provider2 = new FakeProvider([{ response: endTurn("新会话回答") }]);
+      session.setProvider(provider2);
+      await session.run("继续新会话");
+      expect(provider2.requests[0]?.messages[0]).toEqual({
+        role: "user",
+        content: "历史会话的问题",
+      });
+    } finally {
+      await t.cleanup();
+    }
+  });
+});

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JsonlSessionStore } from "./store";
-import { findLatestSessionFile, messagesFromSessionLines } from "./resume";
+import { findLatestSessionFile, listSessions, messagesFromSessionLines } from "./resume";
 import { AgentSession } from "../loop/agent-session";
 import { ToolRegistry, sourceOf } from "../tools/registry";
 import { readTool } from "../tools/builtin/read";
@@ -74,6 +74,65 @@ describe("会话恢复", () => {
       expect(first[2]).toEqual({ role: "user", content: "继续" });
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const metaLine = (sessionId: string) =>
+  JSON.stringify({ v: 1, type: "meta", sessionId, createdAt: "2026-09-15T10:00:00.000Z", cwd: "/x" });
+const userLine = (content: string) =>
+  JSON.stringify({ v: 1, type: "message", message: { role: "user", content } });
+const assistantLine = (text: string) =>
+  JSON.stringify({
+    v: 1,
+    type: "message",
+    message: { role: "assistant", text, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } },
+  });
+
+describe("listSessions（/resume 列表）", () => {
+  it("按新→旧列出，解析消息数、meta 与首条用户消息预览", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wcode-resume-list-"));
+    try {
+      await writeFile(
+        join(dir, "2026-09-15T08-00-00-000Z.jsonl"),
+        [metaLine("a"), userLine("旧会话的问题"), assistantLine("答")].join("\n"),
+        "utf8",
+      );
+      await writeFile(
+        join(dir, "2026-09-15T14-00-00-000Z.jsonl"),
+        [metaLine("b"), userLine("帮我修复登录  bug，急"), assistantLine("好")].join("\n"),
+        "utf8",
+      );
+      await writeFile(join(dir, "notes.txt"), "非 jsonl 忽略", "utf8");
+
+      const sessions = await listSessions(dir);
+      expect(sessions).toHaveLength(2);
+      expect(sessions[0]?.sessionId).toBe("2026-09-15T14-00-00-000Z"); // 新的在前
+      expect(sessions[0]?.messageCount).toBe(2);
+      expect(sessions[0]?.preview).toBe("帮我修复登录 bug，急"); // 连续空白折叠
+      expect(sessions[0]?.createdAt).toBe("2026-09-15T10:00:00.000Z");
+      expect(sessions[1]?.sessionId).toBe("2026-09-15T08-00-00-000Z");
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
+    }
+  });
+
+  it("limit 截断；损坏行跳过；目录不存在返回空", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wcode-resume-list-"));
+    try {
+      // 时间戳文件名：08 的更新（含损坏行），07 的为空文件
+      await writeFile(
+        join(dir, "2026-09-15T08-00-00-000Z.jsonl"),
+        [metaLine("a"), "{broken json", userLine("问题")].join("\n"),
+        "utf8",
+      );
+      await writeFile(join(dir, "2026-09-15T07-00-00-000Z.jsonl"), "", "utf8");
+      const sessions = await listSessions(dir, 1);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.messageCount).toBe(1); // 损坏行跳过
+      expect(await listSessions(join(dir, "nope"))).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
     }
   });
 });

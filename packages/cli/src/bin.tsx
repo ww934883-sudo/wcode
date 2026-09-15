@@ -19,7 +19,7 @@ import {
   type AgentHost,
 } from "@wcode/core";
 import { FakeProvider, RecordingHost, endTurn, toolUseTurn } from "@wcode/core/testing";
-import { bootstrap, createProvider } from "./bootstrap";
+import { bootstrap, createProvider, refreshRuntime } from "./bootstrap";
 import { handleSlashCommand, type CommandDeps, type CommandSink } from "./commands";
 import { InkHost } from "./ui/ink-host";
 import { App } from "./ui/App";
@@ -51,7 +51,8 @@ async function main(): Promise<number> {
   const host = new InkHost();
 
   try {
-    const { session, config, skills, provider } = await bootstrap({ host, overrides, resume });
+    const { session, config, skills, provider, cwd, sessionsDir, registry, log } =
+      await bootstrap({ host, overrides, resume });
     host.pushHistory({
       kind: "welcome",
       text:
@@ -63,6 +64,7 @@ async function main(): Promise<number> {
 
     // 斜杠命令层：内置命令本地处理，/btw 直答有自己的中断控制器
     const btwAbort: { current: AbortController | null } = { current: null };
+    let currentRegistry: ToolRegistry = registry;
     const sink: CommandSink = {
       note: (t) => host.pushHistory({ kind: "note", text: t }),
       assistant: (t) => host.pushHistory({ kind: "assistant", text: t }),
@@ -73,9 +75,31 @@ async function main(): Promise<number> {
       skills,
       config,
       provider,
-      createModelProvider: (model) => createProvider({ ...config, model }),
+      // 动态读 commandDeps.config：/reload 后配置对象会整体替换
+      createModelProvider: (model) => createProvider({ ...commandDeps.config, model }),
       host,
       btwAbort,
+      sessionsDir,
+      log,
+      reloadRuntime: async () => {
+        const snap = await refreshRuntime({
+          cwd,
+          log,
+          overrides,
+          // MCP 等外部连接迁移到新注册表，不重建子进程
+          carryOverSources: currentRegistry.sourcesOf().filter((s) => s.id !== "builtin"),
+        });
+        session.applyRuntime({
+          registry: snap.registry,
+          engine: snap.engine,
+          system: snap.system,
+          hooks: snap.config.hooks,
+          customAgents: snap.customAgents,
+          bashTimeoutMs: snap.config.tools.bashTimeoutMs,
+        });
+        currentRegistry = snap.registry;
+        return { config: snap.config, skills: snap.skills, problems: snap.problems };
+      },
     };
 
     const app = render(
