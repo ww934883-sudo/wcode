@@ -119,8 +119,12 @@ export class AnthropicProvider implements ModelProvider {
         }
       } else if (type === "message_delta") {
         const delta = payload.delta as { stop_reason?: string };
-        const outUsage = payload.usage as { output_tokens?: number } | undefined;
+        const outUsage = payload.usage as
+          | { output_tokens?: number; input_tokens?: number }
+          | undefined;
         usage.outputTokens = outUsage?.output_tokens ?? usage.outputTokens;
+        // 部分兼容网关（如火山）仅在 message_delta 携带完整 usage
+        usage.inputTokens = outUsage?.input_tokens ?? usage.inputTokens;
         if (delta.stop_reason === "tool_use") stopReason = "tool_use";
         else if (delta.stop_reason === "max_tokens") stopReason = "max_tokens";
         else stopReason = "end_turn";

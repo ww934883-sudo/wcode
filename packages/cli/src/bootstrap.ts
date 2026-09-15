@@ -45,11 +45,11 @@ export async function createProvider(
       `provider 类型 "${providerCfg.type}" 的适配器尚未实现（openai-compatible 在 W2 提供）`,
     );
   }
-  const apiKey = process.env[providerCfg.apiKeyEnv] ?? "";
+  const apiKey = providerCfg.apiKey ?? process.env[providerCfg.apiKeyEnv] ?? "";
   if (!apiKey) {
     throw new ConfigError(
-      `缺少 API key：请设置环境变量 ${providerCfg.apiKeyEnv}` +
-        `（或修改 ~/.wcode/settings.json 中 providers.${config.activeProvider}.apiKeyEnv 指向其他变量名）`,
+      `缺少 API key：请在 ~/.wcode/settings.json 的 providers.${config.activeProvider} 里配置` +
+        ` apiKey（用户级）或 apiKeyEnv 指向的环境变量`,
     );
   }
   return new AnthropicProvider({

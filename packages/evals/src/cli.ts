@@ -3,6 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadConfig, type ModelProvider, type WcodeConfig } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
 import { compareReports, runSuite, SUITE_NAME } from "./harness";
 import { evalTasks } from "./tasks";
@@ -14,14 +15,33 @@ const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
 const CYAN = "\x1b[36m";
 
+async function createProviderFromConfig(
+  config: WcodeConfig,
+  model: string,
+): Promise<ModelProvider> {
+  const cfg = config.providers[config.activeProvider];
+  if (!cfg) {
+    throw new Error(`activeProvider "${config.activeProvider}" 在 providers 中不存在`);
+  }
+  if (cfg.type !== "anthropic") {
+    throw new Error(`provider 类型 "${cfg.type}" 的适配器尚未实现`);
+  }
+  const apiKey = cfg.apiKey ?? process.env[cfg.apiKeyEnv] ?? "";
+  if (!apiKey) {
+    throw new Error(
+      "缺少 API key：请在 ~/.wcode/settings.json 的 providers 里配置 apiKey 或 apiKeyEnv",
+    );
+  }
+  return new AnthropicProvider({ apiKey, model, baseUrl: cfg.baseUrl });
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const list = args.includes("--list");
   const compareFile = args.find((a) => a.startsWith("--compare="))?.split("=").slice(1).join("=");
   const only = args.find((a) => a.startsWith("--only="))?.split("=").slice(1).join(",");
   const outArg = args.find((a) => a.startsWith("--out="))?.split("=").slice(1).join("=");
-  const model = args.find((a) => a.startsWith("--model="))?.split("=").slice(1).join("=")
-    ?? "claude-sonnet-4-5";
+  const modelArg = args.find((a) => a.startsWith("--model="))?.split("=").slice(1).join("=");
 
   if (list) {
     for (const t of evalTasks) {
@@ -31,11 +51,10 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error("缺少 API key：请设置 ANTHROPIC_API_KEY 后运行。");
-    return 2;
-  }
+  const config = await loadConfig();
+  const model = modelArg ?? config.model;
+  const provider = await createProviderFromConfig(config, model);
+  const providerId = config.activeProvider;
 
   let tasks = evalTasks;
   if (only) {
@@ -43,9 +62,8 @@ async function main(): Promise<number> {
     tasks = evalTasks.filter((t) => ids.has(t.id));
   }
 
-  console.log(`${CYAN}wcode evals${RESET} ${SUITE_NAME} — ${tasks.length} 个任务，model=${model}\n`);
-  const provider = new AnthropicProvider({ apiKey, model });
-  const report = await runSuite(tasks, { provider, model, providerId: "anthropic" });
+  console.log(`${CYAN}wcode evals${RESET} ${SUITE_NAME} — ${tasks.length} 个任务，model=${model}（provider=${providerId}）\n`);
+  const report = await runSuite(tasks, { provider, model, providerId });
 
   // 结果表
   const idWidth = Math.max(...report.results.map((r) => r.id.length)) + 2;

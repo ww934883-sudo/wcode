@@ -18,6 +18,11 @@ export const configSchema = z.object({
         type: z.enum(["anthropic", "openai-compatible"]),
         /** 只存环境变量名，不存密钥明文（安全基线 §4.7） */
         apiKeyEnv: z.string().default("ANTHROPIC_API_KEY"),
+        /**
+         * 明文密钥：仅供用户级 ~/.wcode/settings.json 使用（该文件在仓库外）。
+         * 项目级可提交配置一律用 apiKeyEnv。两者同时存在时 apiKey 优先。
+         */
+        apiKey: z.string().optional(),
         baseUrl: z.string().optional(),
       }),
     )
