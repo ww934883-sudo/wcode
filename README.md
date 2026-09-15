@@ -76,7 +76,22 @@ pnpm dev -- --mode=acceptEdits
 - provider-anthropic（SSE 流解析、tool_use 增量拼接、图像块映射、错误分类）
 - JSONL 会话持久化、脱敏日志、分层配置、readline REPL
 
-测试与门禁：100 用例全绿；dependency-cruiser 依赖单向门禁；三包严格 TS；
+测试与门禁：106 用例全绿；dependency-cruiser 依赖单向门禁；四包严格 TS；
 `wcode --selftest` 无网络自检。
 
-后续（W3 后半）：ink TUI 重构、自定义子 Agent 配置、Skills/Hooks、评测集。
+## 评测集（真实任务基线）
+
+`packages/evals`：20 个确定性任务（编辑/代码理解/多文件/调试/命令/搜索/综合），
+评分不依赖模型自评（文件断言 + 命令运行 + JSON 字段比对）。
+
+```bash
+pnpm eval -- --list                    # 查看任务清单
+pnpm eval                              # 跑全套（需 ANTHROPIC_API_KEY，结果写入 evals-results/）
+pnpm eval -- --only edit-typo,debug-off-by-one
+pnpm eval -- --compare evals-results/<基线>.json   # 与基线对比，找回退/修复
+```
+
+每次换模型、改 system prompt 或核心循环后跑一遍，回退即报警。
+harness 本身有离线测试（FakeProvider 驱动，CI 不花 token）。
+
+后续：ink TUI 重构、自定义子 Agent 配置、Skills/Hooks。

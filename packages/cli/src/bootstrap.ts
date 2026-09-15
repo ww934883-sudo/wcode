@@ -8,6 +8,7 @@ import {
   PermissionEngine,
   ToolRegistry,
   buildSystemPrompt,
+  builtinToolSource,
   createFileLogger,
   createAgentsMdSection,
   createMcpToolSource,
@@ -28,34 +29,6 @@ import {
   type PromptSection,
 } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
-import {
-  bashTool,
-  editTool,
-  globTool,
-  grepTool,
-  readTool,
-  todoReadTool,
-  todoWriteTool,
-  taskTool,
-  writeTool,
-  taskOutputTool,
-  taskStopTool,
-} from "@wcode/core";
-import type { Tool } from "@wcode/core";
-
-export const BUILTIN_TOOLS: Tool[] = [
-  readTool,
-  writeTool,
-  editTool,
-  globTool,
-  grepTool,
-  bashTool,
-  todoWriteTool,
-  todoReadTool,
-  taskOutputTool,
-  taskStopTool,
-  taskTool,
-];
 
 export async function createProvider(
   config: WcodeConfig,
@@ -115,7 +88,7 @@ export async function bootstrap(options: {
     options.provider ?? (await createProvider(config));
 
   const registry = new ToolRegistry();
-  await registry.registerSource({ id: "builtin", listTools: () => BUILTIN_TOOLS });
+  await registry.registerSource(builtinToolSource);
 
   // MCP servers：连接失败降级跳过，不阻塞启动（架构文档 §11）
   for (const [name, cfg] of Object.entries(config.mcpServers ?? {})) {

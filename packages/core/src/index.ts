@@ -21,6 +21,7 @@ export * from "./tools/builtin/bash";
 export * from "./tools/builtin/tasks";
 export * from "./tools/builtin/todo";
 export * from "./tools/builtin/task";
+export { builtinTools, builtinToolSource } from "./tools/builtin/index";
 export * from "./context/micro-clean";
 export * from "./context/compact";
 export * from "./mcp/tool-source";

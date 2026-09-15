@@ -8,9 +8,10 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/provider-anthropic/tsconfig.json && tsc -p packages/cli/tsconfig.json",
+    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/provider-anthropic/tsconfig.json && tsc -p packages/cli/tsconfig.json && tsc -p packages/evals/tsconfig.json",
     "lint:deps": "dependency-cruise --config .dependency-cruiser.cjs packages",
-    "dev": "pnpm --filter @wcode/cli dev"
+    "dev": "pnpm --filter @wcode/cli dev",
+    "eval": "pnpm --filter @wcode/evals dev"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
