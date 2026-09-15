@@ -132,6 +132,43 @@ describe("OpenAIChatProvider 契约", () => {
     }).rejects.toMatchObject({ retryable: false, status: 401 });
   });
 
+  describe("listModels", () => {
+    it("GET /models 解析 id 列表并过滤 Shutdown", async () => {
+      let calledUrl = "";
+      const provider = new OpenAIChatProvider({
+        apiKey: "k",
+        model: "m",
+        fetchImpl: (async (url: string) => {
+          calledUrl = url;
+          return new Response(
+            JSON.stringify({
+              data: [
+                { id: "m1", status: "Active" },
+                { id: "dead", status: "Shutdown" },
+                { id: "m2" },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }) as unknown as typeof fetch,
+      });
+      await expect(provider.listModels()).resolves.toEqual(["m1", "m2"]);
+      expect(calledUrl.endsWith("/models")).toBe(true);
+    });
+
+    it("请求失败 → ProviderError", async () => {
+      const provider = new OpenAIChatProvider({
+        apiKey: "k",
+        model: "m",
+        fetchImpl: (async () => sseResponse("no access", 403)) as typeof fetch,
+      });
+      await expect(provider.listModels()).rejects.toMatchObject({
+        retryable: false,
+        status: 403,
+      });
+    });
+  });
+
   describe("toChatMessages", () => {
     it("system 置首；assistant 带 tool_calls；tool_result 逐条映射 role:tool", () => {
       const wire = toChatMessages(

@@ -31,4 +31,9 @@ export interface ModelProvider {
   readonly model: string;
   stream(req: ModelRequest): AsyncIterable<StreamEvent>;
   countTokens(messages: Message[]): Promise<number>;
+  /**
+   * 可选能力：列出该 provider 端点可用的模型 id（/model 选择列表）。
+   * 网关不支持或请求失败时由调用方降级为手输模型名。
+   */
+  listModels?(): Promise<string[]>;
 }

@@ -178,6 +178,26 @@ export class OpenAIResponsesProvider implements ModelProvider {
     };
   }
 
+  /** GET /models（与 Chat Completions 同一目录端点）；过滤 Shutdown */
+  async listModels(): Promise<string[]> {
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/models`, {
+        headers: { authorization: `Bearer ${this.apiKey}` },
+      });
+      if (!res.ok) throw await toOpenAIProviderError(res, "OpenAI Responses API");
+      const data = (await res.json()) as {
+        data?: Array<{ id?: string; status?: string }>;
+      };
+      return (data.data ?? [])
+        .filter((m) => m.id && m.status !== "Shutdown")
+        .map((m) => m.id as string);
+    } catch (err) {
+      if (isAbortedError(err)) throw new AbortedError();
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError(`listModels 失败: ${describe(err)}`, { retryable: true });
+    }
+  }
+
   /** OpenAI 无公开计数端点：按 chars/3 估算（与 core 压缩阈值估算同款） */
   async countTokens(messages: Message[]): Promise<number> {
     const chars = messages.reduce((sum, m) => {

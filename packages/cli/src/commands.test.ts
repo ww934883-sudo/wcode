@@ -47,9 +47,9 @@ const skills: SkillDefinition[] = [
 
 async function makeDeps(
   turns: FakeTurn[] = [],
-  opts?: { skills?: SkillDefinition[] },
+  opts?: { skills?: SkillDefinition[]; models?: string[] },
 ): Promise<{ deps: CommandDeps; host: RecordingHost; session: AgentSession }> {
-  const provider = new FakeProvider(turns);
+  const provider = new FakeProvider(turns, { models: opts?.models });
   const host = new RecordingHost();
   const registry = new ToolRegistry();
   await registry.registerSource(sourceOf("builtin", [readTool]));
@@ -69,7 +69,16 @@ async function makeDeps(
     config,
     provider,
     createModelProvider: async (model) =>
-      new FakeProvider([{ response: endTurn(`模型 ${model} 就绪`) }]),
+      new FakeProvider([{ response: endTurn(`模型 ${model} 就绪`) }], {
+        models: opts?.models,
+      }),
+    listModels: async () => {
+      try {
+        return await provider.listModels();
+      } catch {
+        return null;
+      }
+    },
     host,
     btwAbort: { current: null },
     registry,
@@ -97,17 +106,44 @@ describe("handleSlashCommand", () => {
   });
 
   it("/model 无参显示当前模型；带参切换并立即生效", async () => {
-    const { deps, session } = await makeDeps();
-    const { sink, notes } = makeSink();
+    const { deps, session } = await makeDeps([], {
+      models: ["glm-5.3-flash", "glm-4.5-air", "deepseek-chat"],
+    });
+    const { sink, notes, assistant } = makeSink();
     await handleSlashCommand("/model", deps, sink);
-    expect(notes[0]).toContain("claude-sonnet-4-5");
+    expect(assistant[0]).toContain("当前模型: claude-sonnet-4-5");
+    expect(assistant[0]).toContain("1. glm-5.3-flash");
+    expect(assistant[0]).toContain("3. deepseek-chat");
 
-    await handleSlashCommand("/model glm-5.3-flash", deps, sink);
-    expect(notes[1]).toContain("glm-5.3-flash");
-    expect(deps.config.model).toBe("glm-5.3-flash");
+    await handleSlashCommand("/model glm-4.5-air", deps, sink);
+    expect(notes[0]).toContain("glm-4.5-air");
+    expect(deps.config.model).toBe("glm-4.5-air");
     // 切换后新 provider 立即接管后续请求
     const result = await session.run("hi");
-    expect(result.reply).toBe("模型 glm-5.3-flash 就绪");
+    expect(result.reply).toBe("模型 glm-4.5-air 就绪");
+  });
+
+  it("/model 按序号选择列表中的模型，序号越界报错", async () => {
+    const { deps } = await makeDeps([], { models: ["m-a", "m-b"] });
+    const { sink, notes, errors } = makeSink();
+
+    await handleSlashCommand("/model 2", deps, sink);
+    expect(notes[0]).toContain("已切换模型: m-b");
+    expect(deps.config.model).toBe("m-b");
+
+    await handleSlashCommand("/model 99", deps, sink);
+    expect(errors[0]).toContain("序号超出范围 1-2");
+  });
+
+  it("/model provider 不支持列表时降级为手输", async () => {
+    const { deps } = await makeDeps(); // FakeProvider 未配置 models → listModels 失败
+    const { sink, notes } = makeSink();
+    await handleSlashCommand("/model", deps, sink);
+    expect(notes[0]).toContain("未能获取该端点的模型列表");
+    expect(notes[0]).toContain("claude-sonnet-4-5");
+
+    await handleSlashCommand("/model hand-typed-model", deps, sink);
+    expect(notes[1]).toContain("已切换模型: hand-typed-model");
   });
 
   it("/skill 列表 / 调用 / 未知技能", async () => {

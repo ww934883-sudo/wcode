@@ -111,6 +111,17 @@ async function main(): Promise<number> {
       provider,
       // 动态读 commandDeps.config：/reload 后配置对象会整体替换
       createModelProvider: (model) => createProvider({ ...commandDeps.config, model }),
+      // 模型列表：provider 不支持或请求失败 → null，命令层降级为手输
+      listModels: async () => {
+        const p = commandDeps.provider;
+        if (!p.listModels) return null;
+        try {
+          return await p.listModels();
+        } catch (err) {
+          log.warn("model.list-failed", { error: errorMessage(err) });
+          return null;
+        }
+      },
       host,
       btwAbort,
       registry,

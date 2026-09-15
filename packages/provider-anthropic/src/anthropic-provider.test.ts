@@ -117,6 +117,37 @@ describe("AnthropicProvider 契约", () => {
     }).rejects.toMatchObject({ retryable: false, status: 401 });
   });
 
+  describe("listModels", () => {
+    it("GET /v1/models 单页取全并解析 id 列表", async () => {
+      let calledUrl = "";
+      const provider = new AnthropicProvider({
+        apiKey: "k",
+        model: "m",
+        fetchImpl: (async (url: string) => {
+          calledUrl = url;
+          return new Response(
+            JSON.stringify({ data: [{ id: "claude-x" }, { id: "claude-y" }] }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }) as unknown as typeof fetch,
+      });
+      await expect(provider.listModels()).resolves.toEqual(["claude-x", "claude-y"]);
+      expect(calledUrl).toContain("/v1/models?limit=1000");
+    });
+
+    it("网关不支持（401）→ ProviderError 不可重试", async () => {
+      const provider = new AnthropicProvider({
+        apiKey: "k",
+        model: "m",
+        fetchImpl: (async () => sseResponse("unauthorized", 401)) as unknown as typeof fetch,
+      });
+      await expect(provider.listModels()).rejects.toMatchObject({
+        retryable: false,
+        status: 401,
+      });
+    });
+  });
+
   describe("toAnthropicMessages", () => {
     it("连续 tool_result 合并进一条 user 消息并标记 is_error", () => {
       const wire = toAnthropicMessages([

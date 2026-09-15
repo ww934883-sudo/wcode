@@ -128,6 +128,23 @@ describe("OpenAIResponsesProvider 契约", () => {
     }).rejects.toMatchObject({ retryable: false, status: 401 });
   });
 
+  describe("listModels", () => {
+    it("GET /models（与 Chat 同目录端点）过滤 Shutdown", async () => {
+      const provider = new OpenAIResponsesProvider({
+        apiKey: "k",
+        model: "m",
+        fetchImpl: (async () =>
+          new Response(
+            JSON.stringify({
+              data: [{ id: "gpt-x" }, { id: "dead", status: "Shutdown" }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )) as typeof fetch,
+      });
+      await expect(provider.listModels()).resolves.toEqual(["gpt-x"]);
+    });
+  });
+
   describe("toResponsesInput", () => {
     it("assistant 文本与 function_call 分列；tool_result 映射 function_call_output", () => {
       const input = toResponsesInput([

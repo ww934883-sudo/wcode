@@ -46,7 +46,18 @@ export class FakeProvider implements ModelProvider {
   readonly requests: ModelRequest[] = [];
   private turnIndex = 0;
 
-  constructor(private readonly turns: FakeTurn[]) {}
+  constructor(
+    private readonly turns: FakeTurn[],
+    private readonly opts?: { models?: string[] },
+  ) {}
+
+  /** 配置了 models 才可列出；未配置时抛错（命令层应降级为手输） */
+  async listModels(): Promise<string[]> {
+    if (!this.opts?.models) {
+      throw new ProviderError("FakeProvider 未配置模型列表", { retryable: false });
+    }
+    return this.opts.models;
+  }
 
   async *stream(req: ModelRequest): AsyncIterable<StreamEvent> {
     this.requests.push(req);

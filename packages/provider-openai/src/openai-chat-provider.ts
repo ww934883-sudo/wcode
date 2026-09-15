@@ -157,6 +157,26 @@ export class OpenAIChatProvider implements ModelProvider {
     };
   }
 
+  /** GET /models；status 标记为 Shutdown（已下线）的条目过滤掉 */
+  async listModels(): Promise<string[]> {
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/models`, {
+        headers: { authorization: `Bearer ${this.apiKey}` },
+      });
+      if (!res.ok) throw await toOpenAIProviderError(res, "OpenAI Chat API");
+      const data = (await res.json()) as {
+        data?: Array<{ id?: string; status?: string }>;
+      };
+      return (data.data ?? [])
+        .filter((m) => m.id && m.status !== "Shutdown")
+        .map((m) => m.id as string);
+    } catch (err) {
+      if (isAbortedError(err)) throw new AbortedError();
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError(`listModels 失败: ${describe(err)}`, { retryable: true });
+    }
+  }
+
   /**
    * OpenAI 无计数端点：按 chars/3 估算（core 的 compact 阈值本就用同款估算，
    * 精度一致，不会造成行为差异）。

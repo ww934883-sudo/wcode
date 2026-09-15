@@ -30,10 +30,15 @@ export interface CommandDeps {
   session: AgentSession;
   skills: SkillDefinition[];
   config: WcodeConfig;
-  /** 当前激活 provider（/btw 直答） */
+  /** 当前激活 provider（/btw 直答；/model 切换后由命令层同步替换） */
   provider: ModelProvider;
   /** /model 切换时按新模型名创建 provider（组合根注入 createProvider） */
   createModelProvider(model: string): Promise<ModelProvider>;
+  /**
+   * /model：列出当前 provider 端点的可用模型。
+   * 不支持或请求失败返回 null（命令层降级为手输模型名）。
+   */
+  listModels(): Promise<string[] | null>;
   /** /btw 直答的流式事件通道（AgentHost 接口，非 UI 类型） */
   host: AgentHost;
   /** /btw 的中断控制器；Ctrl+C 时由 bin 一并 abort */
@@ -61,7 +66,7 @@ const HELP_TEXT = [
   "可用命令：",
   "",
   "- **/help** — 显示本帮助",
-  "- **/model** [名称] — 查看或切换模型（会话内生效，重启后回到配置值）",
+  "- **/model** — 列出 provider 可用模型；**/model** <序号|名称> 切换（会话内生效）",
   "- **/skill** — 列出可用技能",
   "- **/skill** <名称> [参数] — 调用技能（等价于直接输入 /技能名）",
   "- **/init** — 探索仓库并生成/完善 AGENTS.md",
@@ -181,17 +186,44 @@ export async function handleSlashCommand(
 
     case "model": {
       if (!args) {
-        sink.note(
-          `当前模型: ${deps.config.model}（provider: ${deps.config.activeProvider}）。` +
-            "切换用法: /model <模型名>（会话内生效）",
-        );
+        const models = await deps.listModels();
+        if (models && models.length > 0) {
+          const lines = models.map(
+            (m, i) => `${i + 1}. ${m}${m === deps.config.model ? "  ← 当前" : ""}`,
+          );
+          sink.assistant(
+            `当前模型: ${deps.config.model}（provider: ${deps.config.activeProvider}）\n\n` +
+              `可用模型（/model <序号> 或 /model <名称> 切换）：\n${lines.join("\n")}`,
+          );
+        } else {
+          sink.note(
+            `当前模型: ${deps.config.model}（provider: ${deps.config.activeProvider}）。` +
+              "未能获取该端点的模型列表（不支持或请求失败），可直接 /model <名称> 切换。",
+          );
+        }
         return { kind: "handled" };
       }
+      // 解析目标：纯数字按列表序号取，其余按模型名直切
+      let target = args.trim();
+      if (/^\d+$/.test(target)) {
+        const models = await deps.listModels();
+        const picked = models?.[Number.parseInt(target, 10) - 1];
+        if (!picked) {
+          sink.error(
+            models && models.length > 0
+              ? `序号超出范围 1-${models.length}。直接输入 /model 查看列表。`
+              : "当前无法获取模型列表，请直接使用 /model <名称> 切换。",
+          );
+          return { kind: "handled" };
+        }
+        target = picked;
+      }
       try {
-        const provider = await deps.createModelProvider(args);
+        const provider = await deps.createModelProvider(target);
         deps.session.setProvider(provider);
-        deps.config.model = args;
-        sink.note(`已切换模型: ${args}（会话内生效）`);
+        deps.provider = provider; // /btw 直答等命令跟随新 provider
+        deps.config.model = target;
+        sink.note(`已切换模型: ${target}（会话内生效）`);
       } catch (err) {
         sink.error(`切换模型失败: ${errorMessage(err)}`);
       }

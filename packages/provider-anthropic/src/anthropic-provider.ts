@@ -174,6 +174,27 @@ export class AnthropicProvider implements ModelProvider {
     };
   }
 
+  /** GET /v1/models（官方分页上限内单页取全）；网关不支持时抛 ProviderError */
+  async listModels(): Promise<string[]> {
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/v1/models?limit=1000`, {
+        headers: {
+          "x-api-key": this.apiKey,
+          "anthropic-version": this.apiVersion,
+        },
+      });
+      if (!res.ok) throw await toProviderError(res);
+      const data = (await res.json()) as { data?: Array<{ id?: string }> };
+      return (data.data ?? [])
+        .map((m) => m.id ?? "")
+        .filter((id) => id.length > 0);
+    } catch (err) {
+      if (isAbortedError(err)) throw new AbortedError();
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError(`listModels 失败: ${describe(err)}`, { retryable: true });
+    }
+  }
+
   async countTokens(messages: Message[]): Promise<number> {
     try {
       const res = await this.fetchImpl(`${this.baseUrl}/v1/messages/count_tokens`, {
