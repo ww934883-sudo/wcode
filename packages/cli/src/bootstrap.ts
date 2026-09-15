@@ -9,7 +9,9 @@ import {
   ToolRegistry,
   buildSystemPrompt,
   createFileLogger,
+  createAgentsMdSection,
   defaultPromptSections,
+  loadAgentsMdFiles,
   loadConfig,
   parseLogLevel,
   parseRuleString,
@@ -18,12 +20,35 @@ import {
   type Logger,
   type ModelProvider,
   type AgentHost,
+  type PromptSection,
 } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
-import { globTool, grepTool, readTool, writeTool } from "@wcode/core";
+import {
+  bashTool,
+  editTool,
+  globTool,
+  grepTool,
+  readTool,
+  todoReadTool,
+  todoWriteTool,
+  writeTool,
+  taskOutputTool,
+  taskStopTool,
+} from "@wcode/core";
 import type { Tool } from "@wcode/core";
 
-export const BUILTIN_TOOLS: Tool[] = [readTool, writeTool, globTool, grepTool];
+export const BUILTIN_TOOLS: Tool[] = [
+  readTool,
+  writeTool,
+  editTool,
+  globTool,
+  grepTool,
+  bashTool,
+  todoWriteTool,
+  todoReadTool,
+  taskOutputTool,
+  taskStopTool,
+];
 
 export async function createProvider(
   config: WcodeConfig,
@@ -106,18 +131,29 @@ export async function bootstrap(options: {
     .append({ v: 1, type: "meta", sessionId, createdAt: new Date().toISOString(), cwd })
     .catch(() => {});
 
+  // 项目记忆：AGENTS.md（兼容 CLAUDE.md）→ PromptSection
+  const agentsMd = await loadAgentsMdFiles({ cwd });
+  const agentsMdSection = createAgentsMdSection(agentsMd);
+  const sections: PromptSection[] = [
+    ...defaultPromptSections,
+    ...(agentsMdSection ? [agentsMdSection] : []),
+  ];
+
   const session = new AgentSession({
     provider,
     registry,
     engine,
     host: options.host,
-    system: buildSystemPrompt(defaultPromptSections, {
+    system: buildSystemPrompt(sections, {
       cwd,
       platform: process.platform,
     }),
     cwd,
     store,
     log,
+    bashTimeoutMs: config.tools.bashTimeoutMs,
+    maxContextTokens: config.context.maxContextTokens,
+    compactThreshold: config.context.compactThreshold,
   });
 
   return { session, config, log };

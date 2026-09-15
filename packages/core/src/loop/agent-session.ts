@@ -11,6 +11,14 @@ import type { SessionStore } from "../session/store";
 import type { Logger } from "../logging/port";
 import { ProviderError, isAbortedError } from "../errors";
 import { createFileLogger } from "../logging/file-logger";
+import { microCleanMessages } from "../context/micro-clean";
+import {
+  SUMMARY_SYSTEM_PROMPT,
+  buildSummaryPrompt,
+  estimateMessagesTokens,
+  estimateTokens,
+  renderConversationForSummary,
+} from "../context/compact";
 import {
   DEFAULT_RETRY_DELAYS_MS,
   MAX_OUTPUT_CHARS_DEFAULT,
@@ -32,6 +40,11 @@ export interface AgentSessionOptions {
   /** 重试延迟序列，测试注入短值 */
   retryDelaysMs?: number[];
   log?: Logger;
+  /** 上下文窗口大小（token 估算），超过 threshold 比例触发压缩 */
+  maxContextTokens?: number;
+  compactThreshold?: number;
+  /** Bash 工具默认超时（透传 ToolContext） */
+  bashTimeoutMs?: number;
 }
 
 export interface RunResult {
@@ -57,6 +70,9 @@ export class AgentSession {
   private readonly maxTurns: number;
   private readonly maxOutputChars: number;
   private readonly retryDelaysMs: number[];
+  private readonly maxContextTokens: number;
+  private readonly compactThreshold: number;
+  private readonly bashTimeoutMs?: number;
   private readonly log: Logger;
   private abortController?: AbortController;
 
@@ -68,6 +84,9 @@ export class AgentSession {
     this.maxTurns = opts.maxTurns ?? MAX_TURNS_DEFAULT;
     this.maxOutputChars = opts.maxOutputChars ?? MAX_OUTPUT_CHARS_DEFAULT;
     this.retryDelaysMs = opts.retryDelaysMs ?? [...DEFAULT_RETRY_DELAYS_MS];
+    this.maxContextTokens = opts.maxContextTokens ?? 200_000;
+    this.compactThreshold = opts.compactThreshold ?? 0.8;
+    this.bashTimeoutMs = opts.bashTimeoutMs;
     this.log = opts.log ?? createFileLogger();
     this.store = opts.store;
     this.state = createSessionState(opts.cwd);
@@ -94,6 +113,7 @@ export class AgentSession {
       for (let turn = 1; turn <= this.maxTurns; turn++) {
         this.host.emit({ type: "turn_start", turn });
 
+        await this.maybeCompact();
         const res = await this.callModel(signal);
         lastText = res.text;
         await this.pushMessage({
@@ -125,7 +145,8 @@ export class AgentSession {
   private async callModel(signal: AbortSignal): Promise<ModelResponse> {
     const req: ModelRequest = {
       system: this.systemPrompt,
-      messages: [...this.state.messages],
+      // 微清理：较老的大体积工具结果替换为占位符（不改会话原数据）
+      messages: microCleanMessages(this.state.messages),
       tools: this.registry.toDefs(),
       maxTokens: 8192,
       signal,
@@ -179,6 +200,8 @@ export class AgentSession {
       session: this.state,
       signal,
       log: this.log,
+      emitEvent: (event) => this.host.emit(event),
+      bashTimeoutMs: this.bashTimeoutMs,
     };
     // 批内并发规则：全只读 → 并行；含任何写操作 → 按声明顺序串行
     const allReadOnly = calls.every(
@@ -202,6 +225,63 @@ export class AgentSession {
     if (this.store) {
       await this.store.append({ v: 1, type: "message", message });
     }
+  }
+
+  /**
+   * 上下文压缩（架构文档 §4·第二层）：token 估算超过阈值时，
+   * 用模型生成结构化摘要替换旧历史，保留最近 2 条消息原文。
+   * 摘要失败不阻断任务（跳过本次压缩，仅提示）。
+   */
+  private async maybeCompact(): Promise<void> {
+    const estimated =
+      estimateTokens(this.systemPrompt) + estimateMessagesTokens(this.state.messages);
+    if (estimated <= this.maxContextTokens * this.compactThreshold) return;
+
+    let summary: string | null = null;
+    try {
+      summary = await this.summarize();
+    } catch (err) {
+      if (isAbortedError(err)) throw err;
+      this.host.emit({
+        type: "error",
+        message: `上下文压缩失败（${err instanceof Error ? err.message : String(err)}），本次跳过继续任务`,
+      });
+      return;
+    }
+
+    const kept = this.state.messages.slice(-2);
+    const inject: Message = {
+      role: "user",
+      content: `[系统提示：上下文已压缩。以下是此前进展的结构化摘要，请基于它继续任务]\n\n${summary}`,
+    };
+    this.state.messages = [inject, ...kept];
+    const note = `已压缩上下文：约 ${estimated} tokens → ${estimateTokens(this.systemPrompt) + estimateMessagesTokens(this.state.messages)} tokens`;
+    this.host.emit({ type: "compacted", note });
+    await this.store
+      ?.append({ v: 1, type: "event", event: { type: "compacted", note } })
+      .catch(() => {});
+  }
+
+  private async summarize(): Promise<string> {
+    const rendered = renderConversationForSummary(this.state.messages);
+    const req: ModelRequest = {
+      system: SUMMARY_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: buildSummaryPrompt(rendered) }],
+      tools: [],
+      maxTokens: 4096,
+      signal: this.abortController?.signal ?? new AbortController().signal,
+    };
+    let text = "";
+    let response: ModelResponse | undefined;
+    for await (const ev of this.provider.stream(req)) {
+      if (ev.type === "text_delta") text += ev.text;
+      else response = ev.response;
+    }
+    const summary = response?.text ?? text;
+    if (!summary.trim()) {
+      throw new ProviderError("摘要为空", { retryable: false });
+    }
+    return summary.trim();
   }
 }
 

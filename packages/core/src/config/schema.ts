@@ -41,8 +41,9 @@ export const configSchema = z.object({
   context: z
     .object({
       compactThreshold: z.number().min(0.3).max(0.95).default(0.8),
+      maxContextTokens: z.number().int().positive().default(200_000),
     })
-    .default({ compactThreshold: 0.8 }),
+    .default({ compactThreshold: 0.8, maxContextTokens: 200_000 }),
   log: z
     .object({
       level: z.enum(["debug", "info", "warn", "error"]).default("info"),

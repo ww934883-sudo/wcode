@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ToolDef } from "../types";
+import type { AgentEvent } from "../host/port";
 import type { Logger } from "../logging/port";
 import type { SessionState } from "../session/state";
 
@@ -13,6 +14,10 @@ export interface ToolContext {
   session: SessionState;
   signal: AbortSignal;
   log: Logger;
+  /** 工具向 UI 发事件的通道（如 todo 清单变更）；由 AgentSession 注入 */
+  emitEvent?: (event: AgentEvent) => void;
+  /** Bash 默认超时（来自配置 tools.bashTimeoutMs），由 AgentSession 注入 */
+  bashTimeoutMs?: number;
 }
 
 /**

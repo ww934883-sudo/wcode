@@ -6,6 +6,7 @@ import { AgentSession } from "./agent-session";
 import { ToolRegistry, sourceOf } from "../tools/registry";
 import { readTool } from "../tools/builtin/read";
 import { writeTool } from "../tools/builtin/write";
+import { todoWriteTool } from "../tools/builtin/todo";
 import { PermissionEngine } from "../permission/engine";
 import { FakeProvider, toolUseTurn, endTurn } from "../testing/fake-provider";
 import { RecordingHost, makeSession } from "../testing/fixtures";
@@ -16,8 +17,10 @@ async function makeSessionDeps() {
   const dir = await mkdtemp(join(tmpdir(), "wcode-loop-"));
   const host = new RecordingHost();
   const registry = new ToolRegistry();
-  await registry.registerSource(sourceOf("builtin", [readTool, writeTool]));
-  const cleanup = () => rm(dir, { recursive: true, force: true });
+  await registry.registerSource(
+    sourceOf("builtin", [readTool, writeTool, todoWriteTool]),
+  );
+  const cleanup = () => rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
   return { dir, host, registry, cleanup };
 }
 
@@ -187,6 +190,128 @@ describe("AgentSession 最小循环 e2e", () => {
       expect(result.status).toBe("end_turn");
       // 第二次同类写不再询问（权限被会话学习）
       expect(engine.evaluate({ toolName: "write", isReadOnly: false, patterns: [`write(${target})`] }).decision).toBe("allow");
+    } finally {
+      await t.cleanup();
+    }
+  });
+});
+
+describe("AgentSession W2：上下文管理与 todo", () => {
+  it("超过阈值触发压缩：摘要注入、compacted 事件、后续请求带摘要", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const big = join(t.dir, "big.txt");
+      await writeFile(big, "K".repeat(2000), "utf8"); // ~667 tokens 的工具结果
+
+      const provider = new FakeProvider([
+        { response: toolUseTurn([{ id: "t1", name: "read", input: { file_path: big } }]) },
+        { response: endTurn("## 任务目标\n摘要标记XYZ") }, // 被当作摘要消费
+        { response: endTurn("final") },
+      ]);
+      const session = new AgentSession({
+        provider,
+        registry: t.registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+        maxContextTokens: 500, // 阈值 400 < ~680，第二轮前触发
+        compactThreshold: 0.8,
+      });
+      const result = await session.run("读取 big.txt");
+      expect(result.status).toBe("end_turn");
+      expect(result.reply).toBe("final");
+
+      // 摘要请求走的是 provider 第二轮
+      const summaryReq = provider.requests[1]!;
+      expect(summaryReq.system).toContain("摘要");
+      // 压缩后的正式请求：消息历史被替换为 摘要注入 + 最近 2 条
+      const turn2Req = provider.requests[2]!;
+      const first = turn2Req.messages[0]!;
+      expect(first.role).toBe("user");
+      expect((first as { content: string }).content).toContain("上下文已压缩");
+      expect((first as { content: string }).content).toContain("摘要标记XYZ");
+      expect(turn2Req.messages.length).toBeLessThanOrEqual(3);
+
+      expect(t.host.events.some((e) => e.type === "compacted")).toBe(true);
+      expect(session.state.messages[0]!.role).toBe("user");
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("微清理进入请求：较老的大工具结果变为占位符", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const big = join(t.dir, "big.txt");
+      await writeFile(big, "K".repeat(1000), "utf8");
+      const small = join(t.dir, "small.txt");
+      await writeFile(small, "tiny\n", "utf8");
+
+      const provider = new FakeProvider([
+        { response: toolUseTurn([{ id: "t1", name: "read", input: { file_path: big } }]) },
+        { response: toolUseTurn([{ id: "t2", name: "read", input: { file_path: small } }]) },
+        { response: toolUseTurn([{ id: "t3", name: "read", input: { file_path: small } }]) },
+        { response: endTurn("done") },
+      ]);
+      const session = new AgentSession({
+        provider,
+        registry: t.registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      const result = await session.run("连续读文件");
+      expect(result.reply).toBe("done");
+
+      // 第 4 轮请求中：最早的大 tool_result 已被清理，最近两条保留
+      const lastReq = provider.requests[3]!;
+      const toolResults = lastReq.messages.filter((m) => m.role === "tool_result");
+      const first = (toolResults[0] as { results: Array<{ content: string }> }).results[0]!.content;
+      expect(first).toContain("已清理");
+      expect(toolResults.length).toBe(3);
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("todo_write 更新会话清单并发出 todos_changed", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([
+        {
+          response: toolUseTurn([
+            {
+              id: "t1",
+              name: "todo_write",
+              input: {
+                items: [
+                  { content: "步骤一", status: "completed" },
+                  { content: "步骤二", status: "in_progress", priority: "high" },
+                ],
+              },
+            },
+          ]),
+        },
+        { response: endTurn("planned") },
+      ]);
+      const session = new AgentSession({
+        provider,
+        registry: t.registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      await session.run("列个计划");
+      expect(session.state.todos).toHaveLength(2);
+      expect(session.state.todos[1]?.content).toBe("步骤二");
+      const todoEvents = t.host.eventsOfType("todos_changed");
+      expect(todoEvents).toHaveLength(1);
     } finally {
       await t.cleanup();
     }

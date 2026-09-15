@@ -1,5 +1,6 @@
 import type { ToolCall } from "../types";
 import type { Usage } from "../types";
+import type { TodoItem } from "../session/state";
 
 /** 单向事件流：core → UI。封闭的判别联合，新增事件即新增 UI 挂载点。 */
 export type AgentEvent =
@@ -15,6 +16,8 @@ export type AgentEvent =
       durationMs: number;
     }
   | { type: "usage"; usage: Usage; cumulative: Usage }
+  | { type: "todos_changed"; todos: TodoItem[] }
+  | { type: "compacted"; note: string }
   | { type: "error"; message: string }
   | { type: "done"; reason: "end_turn" | "max_turns" | "aborted" };
 
