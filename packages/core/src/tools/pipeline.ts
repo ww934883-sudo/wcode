@@ -125,7 +125,12 @@ export class ToolExecutor {
       if (this.opts.hookPost) {
         await this.opts.hookPost({ toolName: call.name, input: parsed.data });
       }
-      return { callId: call.id, content: text, isError: false };
+      return {
+        callId: call.id,
+        content: text,
+        isError: false,
+        ...(out.images && out.images.length > 0 ? { images: out.images } : {}),
+      };
     } catch (err) {
       if (isAbortedError(err) || err instanceof AbortedSignalError) throw err;
       const msg = `工具 ${call.name} 执行失败: ${errorMessage(err)}`;

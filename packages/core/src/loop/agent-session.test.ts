@@ -7,6 +7,7 @@ import { ToolRegistry, sourceOf } from "../tools/registry";
 import { readTool } from "../tools/builtin/read";
 import { writeTool } from "../tools/builtin/write";
 import { todoWriteTool } from "../tools/builtin/todo";
+import { taskTool } from "../tools/builtin/task";
 import { PermissionEngine } from "../permission/engine";
 import { FakeProvider, toolUseTurn, endTurn } from "../testing/fake-provider";
 import { RecordingHost, makeSession } from "../testing/fixtures";
@@ -18,7 +19,7 @@ async function makeSessionDeps() {
   const host = new RecordingHost();
   const registry = new ToolRegistry();
   await registry.registerSource(
-    sourceOf("builtin", [readTool, writeTool, todoWriteTool]),
+    sourceOf("builtin", [readTool, writeTool, todoWriteTool, taskTool]),
   );
   const cleanup = () => rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
   return { dir, host, registry, cleanup };
@@ -312,6 +313,81 @@ describe("AgentSession W2：上下文管理与 todo", () => {
       expect(session.state.todos[1]?.content).toBe("步骤二");
       const todoEvents = t.host.eventsOfType("todos_changed");
       expect(todoEvents).toHaveLength(1);
+    } finally {
+      await t.cleanup();
+    }
+  });
+});
+
+describe("AgentSession W3：子 Agent", () => {
+  it("task 工具派生子 Agent：只读探索并把结论带回主对话", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const note = join(t.dir, "note.txt");
+      await writeFile(note, "sub-marker-99", "utf8");
+      // 脚本顺序：父1(task) → 子1(read) → 子2(汇报) → 父2(总结)
+      const provider = new FakeProvider([
+        { response: toolUseTurn([{ id: "p1", name: "task", input: { prompt: `读取 ${note} 并汇报内容` } }]) },
+        { response: toolUseTurn([{ id: "c1", name: "read", input: { file_path: note } }]) },
+        { response: endTurn("子 Agent 汇报：文件内容是 sub-marker-99") },
+        { response: endTurn("任务完成，详见子 Agent 汇报") },
+      ]);
+      const session = new AgentSession({
+        provider,
+        registry: t.registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      const result = await session.run("派个子 Agent 查文件");
+      expect(result.reply).toBe("任务完成，详见子 Agent 汇报");
+
+      // 子 Agent 的汇报作为 task 工具结果进入主对话
+      const toolResultMsg = session.state.messages.find((m) => m.role === "tool_result");
+      const content =
+        toolResultMsg?.role === "tool_result" ? toolResultMsg.results[0]?.content : "";
+      expect(content).toContain("sub-marker-99");
+
+      // 子 Agent 过程事件已转发到宿主 UI（tool_start 含子 Agent 的 read）
+      expect(
+        t.host.events.some(
+          (e) => e.type === "tool_start" && e.call.name === "read",
+        ),
+      ).toBe(true);
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("readonly 子 Agent 无 write 工具（工具子集受限）", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([
+        { response: toolUseTurn([{ id: "p1", name: "task", input: { prompt: "删库跑路" } }]) },
+        { response: toolUseTurn([{ id: "c1", name: "write", input: { file_path: "x.txt", content: "y" } }]) },
+        { response: endTurn("child done") },
+        { response: endTurn("parent done") },
+      ]);
+      const session = new AgentSession({
+        provider,
+        registry: t.registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      await session.run("执行子任务");
+      // 行为断言：readonly 子 Agent 的 write 调用未产生任何文件
+      const { stat } = await import("node:fs");
+      const written = await new Promise<boolean>((resolve2) => {
+        stat(join(t.dir, "x.txt"), (err) => resolve2(!err));
+      });
+      expect(written).toBe(false);
+      // 子 Agent 仍正常收尾，主对话拿到汇报
+      expect(session.state.messages.at(-1)).toMatchObject({ role: "assistant" });
     } finally {
       await t.cleanup();
     }

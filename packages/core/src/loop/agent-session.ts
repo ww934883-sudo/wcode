@@ -1,9 +1,10 @@
 import type { Message, ToolCall, ToolResultBlock } from "../types";
 import type { ModelProvider, ModelRequest, ModelResponse } from "../model/port";
 import type { AgentHost, AgentEvent, PermissionDecision, PermissionRequest } from "../host/port";
-import type { ToolRegistry } from "../tools/registry";
+import { ToolRegistry, sourceOf } from "../tools/registry";
 import { ToolExecutor } from "../tools/pipeline";
 import type { ToolContext } from "../tools/tool";
+import type { SubAgentTask } from "../tools/builtin/task";
 import { PermissionEngine } from "../permission/engine";
 import type { SessionState } from "../session/state";
 import { createSessionState } from "../session/state";
@@ -45,6 +46,8 @@ export interface AgentSessionOptions {
   compactThreshold?: number;
   /** Bash 工具默认超时（透传 ToolContext） */
   bashTimeoutMs?: number;
+  /** 会话恢复：重放的既有消息历史 */
+  initialMessages?: Message[];
 }
 
 export interface RunResult {
@@ -73,6 +76,7 @@ export class AgentSession {
   private readonly maxContextTokens: number;
   private readonly compactThreshold: number;
   private readonly bashTimeoutMs?: number;
+  private readonly engine: PermissionEngine;
   private readonly log: Logger;
   private abortController?: AbortController;
 
@@ -81,6 +85,7 @@ export class AgentSession {
     this.registry = opts.registry;
     this.host = opts.host;
     this.systemPrompt = opts.system;
+    this.engine = opts.engine;
     this.maxTurns = opts.maxTurns ?? MAX_TURNS_DEFAULT;
     this.maxOutputChars = opts.maxOutputChars ?? MAX_OUTPUT_CHARS_DEFAULT;
     this.retryDelaysMs = opts.retryDelaysMs ?? [...DEFAULT_RETRY_DELAYS_MS];
@@ -90,6 +95,9 @@ export class AgentSession {
     this.log = opts.log ?? createFileLogger();
     this.store = opts.store;
     this.state = createSessionState(opts.cwd);
+    if (opts.initialMessages && opts.initialMessages.length > 0) {
+      this.state.messages = [...opts.initialMessages];
+    }
     this.executor = new ToolExecutor(this.registry, {
       host: opts.host,
       engine: opts.engine,
@@ -202,6 +210,7 @@ export class AgentSession {
       log: this.log,
       emitEvent: (event) => this.host.emit(event),
       bashTimeoutMs: this.bashTimeoutMs,
+      spawn: (task) => this.runSubAgent(task),
     };
     // 批内并发规则：全只读 → 并行；含任何写操作 → 按声明顺序串行
     const allReadOnly = calls.every(
@@ -262,8 +271,55 @@ export class AgentSession {
       .catch(() => {});
   }
 
-  private async summarize(): Promise<string> {
-    const rendered = renderConversationForSummary(this.state.messages);
+  /**
+   * 子 Agent（架构文档 §2.8 扩展点）：全新消息数组 + 工具子集 + 继承权限引擎，
+   * 只把最终文本返回主对话。子 Agent 不再派生（防止递归），轮数上限更低。
+   */
+  private async runSubAgent(task: SubAgentTask): Promise<string> {
+    const childTools = this.registry
+      .list()
+      .filter((t) =>
+        task.tools === "all" ? t.name !== "task" : t.isReadOnly && t.name !== "task",
+      );
+    const childRegistry = new ToolRegistry();
+    await childRegistry.registerSource(sourceOf("subagent", childTools));
+
+    const childSession = new AgentSession({
+      provider: this.provider,
+      registry: childRegistry,
+      host: {
+        // 过程事件转发给 UI（文本增量不转发，避免与主输出交错）
+        emit: (event) => {
+          if (
+            event.type === "tool_start" ||
+            event.type === "tool_end" ||
+            event.type === "error" ||
+            event.type === "compacted"
+          ) {
+            this.host.emit(event);
+          }
+        },
+        // 写操作仍需用户确认：子 Agent 的权限询问透传给宿主 UI
+        requestPermission: (req) => this.host.requestPermission(req),
+      },
+      engine: this.engine,
+      system:
+        "你是被主 Agent 派出的子 Agent，专注完成以下任务：\n\n" +
+        `${task.prompt}\n\n` +
+        "完成后用简洁文本汇报结论（主 Agent 只能看到这段汇报，看不到你的执行过程）。",
+      cwd: this.state.cwd,
+      maxTurns: 25,
+      retryDelaysMs: this.retryDelaysMs,
+      log: this.log,
+      maxContextTokens: this.maxContextTokens,
+      compactThreshold: this.compactThreshold,
+      bashTimeoutMs: this.bashTimeoutMs,
+    });
+    const result = await childSession.run(task.prompt);
+    return result.reply || "(子 Agent 无输出)";
+  }
+
+  private async summarize(): Promise<string> {    const rendered = renderConversationForSummary(this.state.messages);
     const req: ModelRequest = {
       system: SUMMARY_SYSTEM_PROMPT,
       messages: [{ role: "user", content: buildSummaryPrompt(rendered) }],

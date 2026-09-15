@@ -45,6 +45,7 @@ async function main(): Promise<number> {
   const modeArg = args.find((a) => a.startsWith("--mode="));
   const mode = modeArg?.split("=")[1];
   const overrides = mode ? { permissions: { mode } } : undefined;
+  const resume = args.includes("--continue") || args.includes("-c");
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -54,10 +55,10 @@ async function main(): Promise<number> {
   const host: AgentHost = new ReadlineHost(rl);
 
   try {
-    const { session, config } = await bootstrap({ host, overrides });
+    const { session, config } = await bootstrap({ host, overrides, resume });
     console.log(
       `${CYAN}wcode${RESET} 已就绪 — provider=${config.activeProvider} model=${config.model}` +
-        `（权限模式 ${config.permissions.mode}；/quit 退出；Ctrl+C 中断当前任务）`,
+        `（权限模式 ${config.permissions.mode}${resume ? "，已恢复上一会话" : ""}；/quit 退出；Ctrl+C 中断当前任务）`,
     );
 
     let lastSigintAt = 0;

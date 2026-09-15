@@ -1,10 +1,20 @@
 import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { extname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { defineTool } from "../tool";
 import { contentHash } from "../../session/state";
 
 const MAX_LINES = 2000;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** read 支持的图片格式（架构文档 §2.10 多模态） */
+const IMAGE_MEDIA_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+};
 
 const ReadSchema = z.object({
   file_path: z.string().min(1).describe("要读取的文件路径（绝对路径或相对工作目录）"),
@@ -40,6 +50,23 @@ export const readTool = defineTool({
     }
     if (st.isDirectory()) {
       return { content: `路径是目录而非文件: ${abs}。请改用 glob 工具列出文件。` };
+    }
+
+    // 图片：base64 作为图像块返回（模型需支持视觉；不支持时由 provider/UI 降级提示）
+    const mediaType = IMAGE_MEDIA_TYPES[extname(abs).toLowerCase()];
+    if (mediaType) {
+      if (st.size > MAX_IMAGE_BYTES) {
+        return {
+          content: `图片过大（${st.size} 字节 > ${MAX_IMAGE_BYTES}），不读取: ${abs}`,
+        };
+      }
+      const buf = await readFile(abs);
+      const data = buf.toString("base64");
+      ctx.session.filesRead.set(normalizeKey(abs), contentHash(data));
+      return {
+        content: `[图片文件: ${abs}，${buf.byteLength} 字节，已作为图像内容返回]`,
+        images: [{ type: "image", mediaType, data }],
+      };
     }
 
     let raw: string;

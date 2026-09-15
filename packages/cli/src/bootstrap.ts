@@ -10,14 +10,19 @@ import {
   buildSystemPrompt,
   createFileLogger,
   createAgentsMdSection,
+  createMcpToolSource,
   defaultPromptSections,
+  errorMessage,
+  findLatestSessionFile,
   loadAgentsMdFiles,
   loadConfig,
+  messagesFromSessionLines,
   parseLogLevel,
   parseRuleString,
   projectDirHash,
   type WcodeConfig,
   type Logger,
+  type Message,
   type ModelProvider,
   type AgentHost,
   type PromptSection,
@@ -31,6 +36,7 @@ import {
   readTool,
   todoReadTool,
   todoWriteTool,
+  taskTool,
   writeTool,
   taskOutputTool,
   taskStopTool,
@@ -48,6 +54,7 @@ export const BUILTIN_TOOLS: Tool[] = [
   todoReadTool,
   taskOutputTool,
   taskStopTool,
+  taskTool,
 ];
 
 export async function createProvider(
@@ -92,6 +99,8 @@ export async function bootstrap(options: {
   cwd?: string;
   /** 测试/自检注入假 provider；缺省按配置创建真实 provider */
   provider?: ModelProvider;
+  /** 会话恢复：true 接最近一次会话；字符串按 sessionId 恢复 */
+  resume?: boolean | string;
 }): Promise<Bootstrap> {
   const cwd = options.cwd ?? process.cwd();
   const config = await loadConfig({ overrides: options.overrides, cwd });
@@ -108,6 +117,16 @@ export async function bootstrap(options: {
   const registry = new ToolRegistry();
   await registry.registerSource({ id: "builtin", listTools: () => BUILTIN_TOOLS });
 
+  // MCP servers：连接失败降级跳过，不阻塞启动（架构文档 §11）
+  for (const [name, cfg] of Object.entries(config.mcpServers ?? {})) {
+    try {
+      registry.registerSource(await createMcpToolSource(name, cfg));
+      log.info("mcp.connected", { server: name });
+    } catch (err) {
+      log.warn("mcp.connect-failed", { server: name, error: errorMessage(err) });
+    }
+  }
+
   const rules = [
     ...config.permissions.allow.map((s) => parseRuleString(s, "allow", "config")),
     ...config.permissions.deny.map((s) => parseRuleString(s, "deny", "config")),
@@ -117,19 +136,34 @@ export async function bootstrap(options: {
     mode: config.permissions.mode,
   });
 
-  // 会话持久化：~/.wcode/projects/<路径哈希>/<时间戳>.jsonl
+  // 会话持久化 / 恢复：~/.wcode/projects/<路径哈希>/<时间戳>.jsonl
   const sessionsDir = join(
     homedir(),
     ".wcode",
     "projects",
     projectDirHash(cwd),
   );
-  const sessionId = new Date().toISOString().replace(/[:.]/g, "-");
-  const store = new JsonlSessionStore(join(sessionsDir, `${sessionId}.jsonl`), log);
   await mkdir(sessionsDir, { recursive: true }).catch(() => {});
-  await store
-    .append({ v: 1, type: "meta", sessionId, createdAt: new Date().toISOString(), cwd })
-    .catch(() => {});
+  let store: JsonlSessionStore;
+  let initialMessages: Message[] | undefined;
+  if (options.resume) {
+    const file =
+      typeof options.resume === "string"
+        ? join(sessionsDir, `${options.resume}.jsonl`)
+        : await findLatestSessionFile(sessionsDir);
+    if (!file) {
+      throw new ConfigError("没有可恢复的会话（该目录下无历史会话文件）");
+    }
+    store = new JsonlSessionStore(file, log);
+    initialMessages = messagesFromSessionLines(await store.load());
+    log.info("session.resumed", { file, messages: initialMessages.length });
+  } else {
+    const sessionId = new Date().toISOString().replace(/[:.]/g, "-");
+    store = new JsonlSessionStore(join(sessionsDir, `${sessionId}.jsonl`), log);
+    await store
+      .append({ v: 1, type: "meta", sessionId, createdAt: new Date().toISOString(), cwd })
+      .catch(() => {});
+  }
 
   // 项目记忆：AGENTS.md（兼容 CLAUDE.md）→ PromptSection
   const agentsMd = await loadAgentsMdFiles({ cwd });
@@ -154,6 +188,7 @@ export async function bootstrap(options: {
     bashTimeoutMs: config.tools.bashTimeoutMs,
     maxContextTokens: config.context.maxContextTokens,
     compactThreshold: config.context.compactThreshold,
+    initialMessages,
   });
 
   return { session, config, log };

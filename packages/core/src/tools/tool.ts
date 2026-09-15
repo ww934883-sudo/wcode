@@ -1,13 +1,16 @@
 import type { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import type { ToolDef } from "../types";
+import type { ToolDef, JSONSchema, ImageBlock } from "../types";
 import type { AgentEvent } from "../host/port";
 import type { Logger } from "../logging/port";
 import type { SessionState } from "../session/state";
+import type { SubAgentTask } from "./builtin/task";
 
 export interface ToolOutput {
   content: string;
   isTruncated?: boolean;
+  /** 多模态结果（如 read 读图）；由 provider 映射为各家协议的图像块 */
+  images?: ImageBlock[];
 }
 
 export interface ToolContext {
@@ -18,6 +21,8 @@ export interface ToolContext {
   emitEvent?: (event: AgentEvent) => void;
   /** Bash 默认超时（来自配置 tools.bashTimeoutMs），由 AgentSession 注入 */
   bashTimeoutMs?: number;
+  /** 子 Agent 能力（Task 工具）；由 AgentSession 注入 */
+  spawn?: (task: SubAgentTask) => Promise<string>;
 }
 
 /**
@@ -29,6 +34,8 @@ export interface Tool {
   readonly description: string;
   readonly schema: z.ZodTypeAny;
   readonly isReadOnly: boolean;
+  /** 直接透传的 JSON Schema（如 MCP 工具），优先于 schema 转换结果 */
+  readonly jsonSchemaOverride?: JSONSchema;
   /** 供权限规则匹配的模式串，如 ["Edit(src/app.ts)"] */
   rulePatterns(input: unknown): string[];
   execute(input: unknown, ctx: ToolContext): Promise<ToolOutput>;
@@ -66,6 +73,6 @@ export function toToolDef(tool: Tool): ToolDef {
   return {
     name: tool.name,
     description: tool.description,
-    inputSchema: zodToJsonSchema(tool.schema, { $refStrategy: "none" }),
+    inputSchema: tool.jsonSchemaOverride ?? zodToJsonSchema(tool.schema, { $refStrategy: "none" }),
   };
 }

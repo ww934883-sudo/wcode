@@ -49,6 +49,17 @@ export const configSchema = z.object({
       level: z.enum(["debug", "info", "warn", "error"]).default("info"),
     })
     .default({ level: "info" }),
+  /** MCP servers（架构文档 §11）：连接失败降级跳过，不阻塞启动 */
+  mcpServers: z
+    .record(
+      z.string(),
+      z.object({
+        command: z.string(),
+        args: z.array(z.string()).default([]),
+        env: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .default({}),
 });
 
 export type WcodeConfig = z.infer<typeof configSchema>;

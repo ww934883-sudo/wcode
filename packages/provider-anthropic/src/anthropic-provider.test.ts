@@ -134,5 +134,36 @@ describe("AnthropicProvider 契约", () => {
       expect(user.content).toHaveLength(2);
       expect(user.content[1]?.is_error).toBe(true);
     });
+
+    it("tool_result 携带 images 时映射为 base64 图像块", () => {
+      const wire = toAnthropicMessages([
+        { role: "user", content: "看图" },
+        { role: "assistant", text: "", toolCalls: [{ id: "a", name: "read", input: {} }] },
+        {
+          role: "tool_result",
+          results: [
+            {
+              callId: "a",
+              content: "[图片已返回]",
+              isError: false,
+              images: [{ type: "image", mediaType: "image/png", data: "aGk=" }],
+            },
+          ],
+        },
+      ]);
+      const user = wire[2] as { role: string; content: Array<Record<string, unknown>> };
+      const tr = user.content[0] as {
+        type: string;
+        content: Array<Record<string, unknown>>;
+      };
+      expect(tr.type).toBe("tool_result");
+      expect(tr.content[0]?.type).toBe("text");
+      expect(tr.content[1]?.type).toBe("image");
+      expect(tr.content[1]?.source).toEqual({
+        type: "base64",
+        media_type: "image/png",
+        data: "aGk=",
+      });
+    });
   });
 });

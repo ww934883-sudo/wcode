@@ -23,11 +23,15 @@ export interface ToolCall {
   input: unknown;
 }
 
-/** M1 工具输出均为文本；M3 图片结果在此扩展字段 */
+/**
+ * M1 工具输出以文本为主；images 携带多模态结果（如 read 读图）。
+ * provider 适配器负责把 images 映射为各家协议的图像块。
+ */
 export interface ToolResultBlock {
   callId: string;
   content: string;
   isError: boolean;
+  images?: ImageBlock[];
 }
 
 export interface Usage {

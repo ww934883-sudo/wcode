@@ -210,7 +210,13 @@ export function toAnthropicMessages(messages: Message[]): Array<Record<string, u
         pendingToolResults.push({
           type: "tool_result",
           tool_use_id: r.callId,
-          content: [{ type: "text", text: r.content }],
+          content: [
+            { type: "text", text: r.content },
+            ...(r.images ?? []).map((im) => ({
+              type: "image",
+              source: { type: "base64", media_type: im.mediaType, data: im.data },
+            })),
+          ],
           ...(r.isError ? { is_error: true } : {}),
         });
       }
