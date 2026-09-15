@@ -6,6 +6,7 @@ import type {
   ModelProvider,
   ModelRequest,
   SkillDefinition,
+  ToolRegistry,
   WcodeConfig,
 } from "@wcode/core";
 import {
@@ -42,7 +43,10 @@ export interface CommandDeps {
     config: WcodeConfig;
     skills: SkillDefinition[];
     problems: string[];
+    registry: ToolRegistry;
   }>;
+  /** /mcp：当前工具注册表（/reload 后由命令层同步替换） */
+  registry: ToolRegistry;
   /** /resume：会话记录目录 */
   sessionsDir: string;
   /** /resume 打开会话 store 需要 */
@@ -65,6 +69,7 @@ const HELP_TEXT = [
   "- **/compact** — 立即压缩上下文（结构化摘要 + 最近消息）",
   "- **/goal** [目标] — 查看/设定任务目标（压缩后依然有效）；**/goal clear** 清除",
   "- **/reload** — 热重载配置、权限规则、hooks、技能与子 Agent 定义（无需重启）",
+  "- **/mcp** [名称] — 查看 MCP 服务器连接状态与工具（/reload 重试连接）",
   "- **/resume** [序号] — 列出并恢复历史会话",
   "- **/quit**、**/exit** — 退出 wcode",
   "",
@@ -121,6 +126,34 @@ function skillCatalog(skills: SkillDefinition[]): string {
   return skills
     .map((s) => `- **${s.name}**（${s.source}）— ${s.description || "（无描述）"}`)
     .join("\n");
+}
+
+interface McpServerStatus {
+  name: string;
+  command: string;
+  args: string[];
+  /** 注册表里有 mcp:<name> source 即视为已连接（连接失败时降级跳过不注册） */
+  connected: boolean;
+  /** 去掉 mcp__<server>__ 前缀的短工具名 */
+  tools: string[];
+}
+
+function mcpServerStatuses(deps: CommandDeps): McpServerStatus[] {
+  const sourceIds = new Set(deps.registry.sourcesOf().map((s) => s.id));
+  return Object.entries(deps.config.mcpServers ?? {}).map(([name, cfg]) => {
+    const prefix = `mcp__${name}__`;
+    const tools = deps.registry
+      .list()
+      .filter((t) => t.name.startsWith(prefix))
+      .map((t) => t.name.slice(prefix.length));
+    return {
+      name,
+      command: cfg.command,
+      args: cfg.args ?? [],
+      connected: sourceIds.has(`mcp:${name}`),
+      tools,
+    };
+  });
 }
 
 /**
@@ -236,12 +269,55 @@ export async function handleSlashCommand(
       return { kind: "handled" };
     }
 
+    case "mcp": {
+      const servers = mcpServerStatuses(deps);
+      if (servers.length === 0) {
+        sink.note(
+          "未配置 MCP 服务器。在 ~/.wcode/settings.json 或项目 .wcode/settings.json 的 mcpServers 中添加，例如：\n" +
+            '{ "mcpServers": { "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/tmp"] } } }\n' +
+            "保存后输入 /reload 生效。",
+        );
+        return { kind: "handled" };
+      }
+      const query = args.trim();
+      if (query) {
+        const target = servers.find((s) => s.name === query);
+        if (!target) {
+          sink.error(
+            `未知 MCP 服务器 "${query}"。已配置: ${servers.map((s) => s.name).join("、")}`,
+          );
+          return { kind: "handled" };
+        }
+        const toolLines =
+          target.tools.length > 0
+            ? target.tools.map((t) => `  - ${t}`).join("\n")
+            : "  （无工具）";
+        sink.assistant(
+          `MCP 服务器「${target.name}」\n\n` +
+            `- 命令: \`${target.command}${target.args.length ? " " + target.args.join(" ") : ""}\`\n` +
+            `- 状态: ${target.connected ? "已连接" : "连接失败（修复配置后 /reload 重试）"}\n` +
+            `- 工具（${target.tools.length} 个）:\n${toolLines}`,
+        );
+        return { kind: "handled" };
+      }
+      const lines = servers.map((s) => {
+        const cmd = `${s.command}${s.args.length ? " " + s.args.join(" ") : ""}`;
+        const status = s.connected
+          ? `✓ ${s.tools.length} 个工具`
+          : "✗ 连接失败（/reload 重试）";
+        return `- ${s.name}（${status}）— \`${cmd}\``;
+      });
+      sink.assistant(`MCP 服务器（${servers.length} 个）：\n\n${lines.join("\n")}`);
+      return { kind: "handled" };
+    }
+
     case "reload": {
       try {
         const snap = await deps.reloadRuntime();
-        // 后续命令（/skill、/model 等）使用重载后的配置与技能
+        // 后续命令（/skill、/model、/mcp 等）使用重载后的配置、技能与注册表
         deps.config = snap.config;
         deps.skills = snap.skills;
+        deps.registry = snap.registry;
         const warnings =
           snap.problems.length > 0 ? `；警告: ${snap.problems.join("；")}` : "";
         sink.note(

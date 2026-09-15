@@ -12,8 +12,22 @@ import {
   sourceOf,
 } from "@wcode/core";
 import { FakeProvider, RecordingHost, endTurn, type FakeTurn } from "@wcode/core/testing";
-import type { SkillDefinition } from "@wcode/core";
+import type { SkillDefinition, Tool } from "@wcode/core";
 import { handleSlashCommand, type CommandDeps, type CommandSink } from "./commands";
+
+/** 假 MCP 工具（不经 zod，直接构造 Tool 形状） */
+function fakeMcpTool(name: string, description: string): Tool {
+  return {
+    name,
+    description,
+    schema: {
+      safeParse: () => ({ success: true as const, data: {} }),
+    } as unknown as Tool["schema"],
+    isReadOnly: true,
+    rulePatterns: () => [name],
+    execute: async () => ({ content: "ok" }),
+  };
+}
 
 function makeSink() {
   const notes: string[] = [];
@@ -58,9 +72,15 @@ async function makeDeps(
       new FakeProvider([{ response: endTurn(`模型 ${model} 就绪`) }]),
     host,
     btwAbort: { current: null },
+    registry,
     sessionsDir: await mkdtemp(join(tmpdir(), "wcode-cmd-sessions-")),
     log: createFileLogger({ level: "error" }),
-    reloadRuntime: async () => ({ config, skills: opts?.skills ?? skills, problems: [] }),
+    reloadRuntime: async () => ({
+      config,
+      skills: opts?.skills ?? skills,
+      problems: [],
+      registry,
+    }),
   };
   return { deps, host, session };
 }
@@ -191,9 +211,15 @@ describe("handleSlashCommand", () => {
     const reloadedSkills: SkillDefinition[] = [
       { name: "new-skill", description: "新技能", body: "x", source: "project", path: "/n" },
     ];
+    const reloadedRegistry = new ToolRegistry();
     deps.reloadRuntime = async () => {
       called++;
-      return { config: configSchema.parse({ model: "reloaded-model" }), skills: reloadedSkills, problems: ["技能 bad Name 名字不合法"] };
+      return {
+        config: configSchema.parse({ model: "reloaded-model" }),
+        skills: reloadedSkills,
+        problems: ["技能 bad Name 名字不合法"],
+        registry: reloadedRegistry,
+      };
     };
 
     const out = await handleSlashCommand("/reload", deps, sink);
@@ -201,6 +227,7 @@ describe("handleSlashCommand", () => {
     expect(called).toBe(1);
     expect(deps.config.model).toBe("reloaded-model");
     expect(deps.skills[0]?.name).toBe("new-skill");
+    expect(deps.registry).toBe(reloadedRegistry); // /mcp 等命令跟随新注册表
     expect(notes[0]).toContain("已热重载");
     expect(notes[0]).toContain("警告");
 
@@ -220,6 +247,51 @@ describe("handleSlashCommand", () => {
     await handleSlashCommand("/reload", deps, sink);
     expect(errors[0]).toContain("重载失败");
     expect(deps.config).toBe(originalConfig);
+  });
+
+  it("/mcp 未配置时给出指引", async () => {
+    const { deps } = await makeDeps();
+    const { sink, notes } = makeSink();
+    await handleSlashCommand("/mcp", deps, sink);
+    expect(notes[0]).toContain("未配置 MCP 服务器");
+    expect(notes[0]).toContain("mcpServers");
+  });
+
+  it("/mcp 列出服务器状态（已连接/失败）与工具数", async () => {
+    const { deps } = await makeDeps();
+    await deps.registry.registerSource(
+      sourceOf("mcp:fs", [fakeMcpTool("mcp__fs__read_file", "读文件")]),
+    );
+    deps.config = configSchema.parse({
+      mcpServers: {
+        fs: { command: "node", args: ["fs-server.js"] },
+        ghost: { command: "gone.exe" },
+      },
+    });
+    const { sink, assistant } = makeSink();
+    await handleSlashCommand("/mcp", deps, sink);
+    expect(assistant[0]).toContain("MCP 服务器（2 个）");
+    expect(assistant[0]).toContain("- fs（✓ 1 个工具）— `node fs-server.js`");
+    expect(assistant[0]).toContain("- ghost（✗ 连接失败（/reload 重试））— `gone.exe`");
+  });
+
+  it("/mcp <名称> 显示详情，未知名称报错", async () => {
+    const { deps } = await makeDeps();
+    await deps.registry.registerSource(
+      sourceOf("mcp:fs", [fakeMcpTool("mcp__fs__read_file", "读文件")]),
+    );
+    deps.config = configSchema.parse({
+      mcpServers: { fs: { command: "node", args: ["fs-server.js"] } },
+    });
+    const { sink, assistant, errors } = makeSink();
+
+    await handleSlashCommand("/mcp fs", deps, sink);
+    expect(assistant[0]).toContain("MCP 服务器「fs」");
+    expect(assistant[0]).toContain("已连接");
+    expect(assistant[0]).toContain("read_file");
+
+    await handleSlashCommand("/mcp nope", deps, sink);
+    expect(errors[0]).toContain('未知 MCP 服务器 "nope"');
   });
 
   it("/resume 无参列出历史会话，序号恢复切换消息历史", async () => {

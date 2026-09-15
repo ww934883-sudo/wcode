@@ -79,6 +79,7 @@ async function main(): Promise<number> {
       createModelProvider: (model) => createProvider({ ...commandDeps.config, model }),
       host,
       btwAbort,
+      registry,
       sessionsDir,
       log,
       reloadRuntime: async () => {
@@ -98,7 +99,12 @@ async function main(): Promise<number> {
           bashTimeoutMs: snap.config.tools.bashTimeoutMs,
         });
         currentRegistry = snap.registry;
-        return { config: snap.config, skills: snap.skills, problems: snap.problems };
+        return {
+          config: snap.config,
+          skills: snap.skills,
+          problems: snap.problems,
+          registry: snap.registry,
+        };
       },
     };
 
