@@ -29,6 +29,9 @@ importers:
       '@wcode/provider-anthropic':
         specifier: workspace:*
         version: link:../provider-anthropic
+      '@wcode/provider-openai':
+        specifier: workspace:*
+        version: link:../provider-openai
       ink:
         specifier: ^5
         version: 5.2.1(@types/react@18.3.31)(react@18.3.1)
@@ -66,12 +69,21 @@ importers:
       '@wcode/provider-anthropic':
         specifier: workspace:*
         version: link:../provider-anthropic
+      '@wcode/provider-openai':
+        specifier: workspace:*
+        version: link:../provider-openai
     devDependencies:
       tsx:
         specifier: ^4.19.2
         version: 4.23.13
 
   packages/provider-anthropic:
+    dependencies:
+      '@wcode/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/provider-openai:
     dependencies:
       '@wcode/core':
         specifier: workspace:*

@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@wcode/core": "workspace:*",
-    "@wcode/provider-anthropic": "workspace:*"
+    "@wcode/provider-anthropic": "workspace:*",
+    "@wcode/provider-openai": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.2"

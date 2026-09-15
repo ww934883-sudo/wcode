@@ -14,6 +14,7 @@
   "dependencies": {
     "@wcode/core": "workspace:*",
     "@wcode/provider-anthropic": "workspace:*",
+    "@wcode/provider-openai": "workspace:*",
     "ink": "^5",
     "react": "^18"
   },

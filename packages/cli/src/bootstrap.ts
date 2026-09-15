@@ -36,6 +36,7 @@ import {
   type ToolSource,
 } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
+import { OpenAIChatProvider, OpenAIResponsesProvider } from "@wcode/provider-openai";
 
 export async function createProvider(
   config: WcodeConfig,
@@ -47,11 +48,6 @@ export async function createProvider(
         `可用: ${Object.keys(config.providers).join(", ")}`,
     );
   }
-  if (providerCfg.type !== "anthropic") {
-    throw new ConfigError(
-      `provider 类型 "${providerCfg.type}" 的适配器尚未实现（openai-compatible 在 W2 提供）`,
-    );
-  }
   const apiKey = providerCfg.apiKey ?? process.env[providerCfg.apiKeyEnv] ?? "";
   if (!apiKey) {
     throw new ConfigError(
@@ -59,7 +55,21 @@ export async function createProvider(
         ` apiKey（用户级）或 apiKeyEnv 指向的环境变量`,
     );
   }
-  return new AnthropicProvider({
+  if (providerCfg.type === "anthropic") {
+    return new AnthropicProvider({
+      apiKey,
+      model: config.model,
+      baseUrl: providerCfg.baseUrl,
+    });
+  }
+  if (providerCfg.type === "openai-compatible") {
+    return new OpenAIChatProvider({
+      apiKey,
+      model: config.model,
+      baseUrl: providerCfg.baseUrl,
+    });
+  }
+  return new OpenAIResponsesProvider({
     apiKey,
     model: config.model,
     baseUrl: providerCfg.baseUrl,

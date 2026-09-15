@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, type ModelProvider, type WcodeConfig } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
+import { OpenAIChatProvider, OpenAIResponsesProvider } from "@wcode/provider-openai";
 import { compareReports, runSuite, SUITE_NAME } from "./harness";
 import { evalTasks } from "./tasks";
 import type { SuiteReport } from "./types";
@@ -23,16 +24,16 @@ async function createProviderFromConfig(
   if (!cfg) {
     throw new Error(`activeProvider "${config.activeProvider}" 在 providers 中不存在`);
   }
-  if (cfg.type !== "anthropic") {
-    throw new Error(`provider 类型 "${cfg.type}" 的适配器尚未实现`);
-  }
   const apiKey = cfg.apiKey ?? process.env[cfg.apiKeyEnv] ?? "";
   if (!apiKey) {
     throw new Error(
       "缺少 API key：请在 ~/.wcode/settings.json 的 providers 里配置 apiKey 或 apiKeyEnv",
     );
   }
-  return new AnthropicProvider({ apiKey, model, baseUrl: cfg.baseUrl });
+  const opts = { apiKey, model, baseUrl: cfg.baseUrl };
+  if (cfg.type === "anthropic") return new AnthropicProvider(opts);
+  if (cfg.type === "openai-compatible") return new OpenAIChatProvider(opts);
+  return new OpenAIResponsesProvider(opts);
 }
 
 async function main(): Promise<number> {

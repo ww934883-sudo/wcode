@@ -30,6 +30,13 @@ module.exports = {
       to: { path: "^packages/(cli|provider-)/", pathNot: "^packages/provider-anthropic/" },
     },
     {
+      name: "provider-openai-isolated",
+      severity: "error",
+      comment: "同上：provider-openai 只准依赖 core 与自身",
+      from: { path: "^packages/provider-openai/" },
+      to: { path: "^packages/(cli|provider-)/", pathNot: "^packages/provider-openai/" },
+    },
+    {
       name: "cli-ui-contained",
       severity: "error",
       comment:

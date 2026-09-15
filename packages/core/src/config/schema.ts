@@ -33,7 +33,9 @@ export const configSchema = z.object({
     .record(
       z.string(),
       z.object({
-        type: z.enum(["anthropic", "openai-compatible"]),
+        /** anthropic=Messages 协议；openai-compatible=Chat Completions（DeepSeek/Qwen/GLM/Kimi 等）；
+         * openai-responses=OpenAI Responses API */
+        type: z.enum(["anthropic", "openai-compatible", "openai-responses"]),
         /** 只存环境变量名，不存密钥明文（安全基线 §4.7） */
         apiKeyEnv: z.string().default("ANTHROPIC_API_KEY"),
         /**

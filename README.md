@@ -51,6 +51,30 @@ pnpm dev -- --mode=acceptEdits
 }
 ```
 
+provider `type` 支持三种协议（同一套工具/权限/上下文机制，只换协议适配层）：
+
+| type | 协议 | 适用 |
+| --- | --- | --- |
+| `anthropic` | Anthropic Messages（`/v1/messages`） | Claude 官方、火山 codingPlan（`baseUrl: https://ark.cn-beijing.volces.com/api/coding`） |
+| `openai-compatible` | OpenAI Chat Completions（`/chat/completions`） | DeepSeek / Qwen / GLM / Kimi 官方 API；火山 codingPlan 也可用 `baseUrl: https://ark.cn-beijing.volces.com/api/coding/v3` |
+| `openai-responses` | OpenAI Responses（`/responses`） | OpenAI 官方 |
+
+切换 provider 示例（跨模型评测对比直接换 `activeProvider` + `model` 后跑 `pnpm eval --compare`）：
+
+```json
+{
+  "activeProvider": "deepseek",
+  "model": "deepseek-chat",
+  "providers": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "baseUrl": "https://api.deepseek.com/v1"
+    }
+  }
+}
+```
+
 权限模式：`plan`（只读）/ `default`（变更需确认）/ `acceptEdits`（文件编辑放行）/ `bypass`（全放行）。
 规则格式 `Tool(pattern)`，pattern 走 glob（`**` 跨目录、`*` 不跨目录）。
 调试日志：`WCODE_LOG=debug`，落盘 `~/.wcode/logs/`；会话记录 `~/.wcode/projects/<路径哈希>/`。
