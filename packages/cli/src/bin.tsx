@@ -21,8 +21,23 @@ import {
 import { FakeProvider, RecordingHost, endTurn, toolUseTurn } from "@wcode/core/testing";
 import { bootstrap, createProvider, refreshRuntime } from "./bootstrap";
 import { handleSlashCommand, type CommandDeps, type CommandSink } from "./commands";
+import { runHeadless } from "./headless";
 import { InkHost } from "./ui/ink-host";
 import { App } from "./ui/App";
+
+/** 从 stdin 读取完整任务（wcode -p -，管道场景） */
+function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) {
+      resolve("");
+      return;
+    }
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk: string) => (data += chunk));
+    process.stdin.on("end", () => resolve(data));
+  });
+}
 
 const VERSION = "0.1.0";
 const RED = "\x1b[31m";
@@ -47,6 +62,25 @@ async function main(): Promise<number> {
   const mode = modeArg?.split("=")[1];
   const overrides = mode ? { permissions: { mode } } : undefined;
   const resume = args.includes("--continue") || args.includes("-c");
+  const outputFormat =
+    args.find((a) => a.startsWith("--output-format="))?.split("=")[1] === "json"
+      ? "json"
+      : "text";
+
+  // 无头自动化模式：wcode -p "任务"（或 -p - 从 stdin 读取，适合管道/CI/定时任务）
+  const printIdx = args.findIndex((a) => a === "-p" || a === "--print");
+  if (printIdx >= 0) {
+    let prompt = args[printIdx + 1];
+    if (prompt === "-") prompt = await readStdin();
+    else if (prompt?.startsWith("-")) prompt = undefined;
+    if (!prompt?.trim()) {
+      console.error('用法: wcode -p "任务描述"（或 wcode -p - 从 stdin 读取任务）');
+      return 2;
+    }
+    const result = await runHeadless({ prompt, outputFormat, overrides, resume });
+    if (result.stdout) process.stdout.write(result.stdout + "\n");
+    return result.code;
+  }
 
   const host = new InkHost();
 
@@ -221,7 +255,10 @@ function printHelp(): void {
   console.log(`wcode — 终端编程 Agent
 
 用法:
-  wcode [选项]
+  wcode [选项]                    交互模式
+  wcode -p "任务描述"             无头模式：执行任务、输出结果、退出（自动化）
+  wcode -p -                      无头模式，任务从 stdin 读取（管道场景）
+  wcode -p --output-format=json   无头模式输出 JSON（status/reply/usage）
 
 选项:
   --mode=<mode>   权限模式: plan | default | acceptEdits | bypass
@@ -229,6 +266,12 @@ function printHelp(): void {
   --selftest      无网络自检（验证 Agent 循环与工具管道）
   --version       显示版本
   -h, --help      显示帮助
+
+无头模式说明:
+  - 进度写 stderr，最终结果写 stdout；权限询问自动拒绝
+    （需要放行时用 --mode=bypass / acceptEdits 或配置 allow 规则）
+  - 组合示例: echo "检查依赖过期" | wcode -p -
+    定时续跑:  wcode -p -c "跟进上一会话的任务"
 
 配置:
   ~/.wcode/settings.json          全局配置

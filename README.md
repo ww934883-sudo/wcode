@@ -95,6 +95,27 @@ cli/src/ui 为 ink + React 实现：已完成内容走 `<Static>` 进终端回�
 Ctrl+C 中断任务、两秒内再按退出。markdown 与 diff 为纯函数模块（有单测），
 InkHost 是 AgentHost 的第二个实现（接缝三），core 零改动。
 
+## 自动化（无头模式）
+
+`wcode -p` 让 wcode 作为管道组件被脚本/CI/定时任务调用：不进 TUI，
+进度（工具行/错误）写 **stderr**，最终结果写 **stdout**，跑完即退出。
+
+```bash
+wcode -p "运行 pnpm test 并修复失败用例"        # 直接执行
+echo "总结今天的 git log" | wcode -p -          # 任务从 stdin 读（管道）
+git diff | wcode -p - "审查这段 diff 的安全问题"
+wcode -p --output-format=json "检查依赖"        # JSON 输出 {status, reply, usage, model}
+wcode -p -c "跟进上一会话的任务"                 # 无头续跑最近会话（配定时任务用）
+```
+
+- **退出码**：0 成功（含 max_turns，会提示不完整）；1 运行错误；2 配置错误。
+- **权限**：无头模式无人确认，权限询问**自动拒绝**（stderr 可见）。
+  需要放行时：`--mode=acceptEdits`（编辑放行）、`--mode=bypass`（全放行，慎用）、
+  或在 settings.json 配 `permissions.allow` 规则。
+- **定时任务示例**（Windows 计划任务 / crontab 每晚跑）：
+  `wcode -p -c "检查未完成任务并继续推进，没有则汇报全部完成"`
+- Skills、hooks、子 Agent、AGENTS.md 在无头模式下同样生效。
+
 ## Skills / Hooks / 自定义子 Agent（M2）
 
 ### 斜杠命令
