@@ -202,3 +202,113 @@ describe("AgentSession M2：自定义子 Agent", () => {
     }
   });
 });
+
+describe("AgentSession M2：斜杠命令接口（setProvider / goal / compactNow）", () => {
+  it("setGoal 并入 system prompt，压缩后依然有效（effectiveSystem）", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([{ response: endTurn("收到") }]);
+      const registry = new ToolRegistry();
+      await registry.registerSource(sourceOf("builtin", [readTool]));
+      const session = new AgentSession({
+        provider,
+        registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      session.setGoal("完成重构并保持测试全绿");
+      await session.run("开始");
+      expect(provider.requests[0]?.system).toContain("[当前任务目标");
+      expect(provider.requests[0]?.system).toContain("完成重构并保持测试全绿");
+
+      session.setGoal("  ");
+      expect(session.getGoal()).toBeUndefined(); // 空白视为清除
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("compactNow 跳过阈值直接压缩：摘要注入 + 保留最近消息", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([
+        { response: endTurn("第一轮") },
+        { response: endTurn("第二轮") },
+        { response: endTurn("这是结构化摘要") },
+      ]);
+      const registry = new ToolRegistry();
+      await registry.registerSource(sourceOf("builtin", [readTool]));
+      const session = new AgentSession({
+        provider,
+        registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      await session.run("任务一");
+      await session.run("任务二");
+      expect(session.state.messages).toHaveLength(4);
+
+      const note = await session.compactNow();
+      expect(note).toContain("已压缩上下文");
+      expect(session.state.messages).toHaveLength(3); // 注入摘要 + 保留最近 2 条
+      const inject = session.state.messages[0];
+      expect(inject?.role === "user" && inject.content).toContain("这是结构化摘要");
+      expect(t.host.eventsOfType("compacted")).toHaveLength(1);
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("compactNow 空历史提示无需压缩", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([]);
+      const registry = new ToolRegistry();
+      const session = new AgentSession({
+        provider,
+        registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      const note = await session.compactNow();
+      expect(note).toContain("无需压缩");
+      expect(provider.requests).toHaveLength(0);
+    } finally {
+      await t.cleanup();
+    }
+  });
+
+  it("setProvider 运行期切换模型，下一轮立即生效", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const providerA = new FakeProvider([]);
+      const providerB = new FakeProvider([{ response: endTurn("来自新模型") }]);
+      const registry = new ToolRegistry();
+      const session = new AgentSession({
+        provider: providerA,
+        registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        retryDelaysMs: [1],
+      });
+      session.setProvider(providerB);
+      const result = await session.run("你好");
+      expect(result.reply).toBe("来自新模型");
+      expect(providerA.requests).toHaveLength(0);
+      expect(providerB.requests).toHaveLength(1);
+    } finally {
+      await t.cleanup();
+    }
+  });
+});

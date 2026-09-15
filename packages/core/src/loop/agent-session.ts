@@ -71,10 +71,11 @@ export interface RunResult {
 export class AgentSession {
   readonly state: SessionState;
 
-  private readonly provider: ModelProvider;
+  private provider: ModelProvider;
   private readonly registry: ToolRegistry;
   private readonly host: AgentHost;
   private readonly systemPrompt: string;
+  private goal?: string;
   private readonly executor: ToolExecutor;
   private readonly store?: SessionStore;
   private readonly maxTurns: number;
@@ -146,6 +147,27 @@ export class AgentSession {
     this.abortController?.abort();
   }
 
+  /** 运行期切换模型 provider（/model），下一轮请求立即生效 */
+  setProvider(provider: ModelProvider): void {
+    this.provider = provider;
+  }
+
+  /** /goal 设定任务目标：并入 effective system prompt，压缩上下文后依然有效 */
+  setGoal(goal: string | undefined): void {
+    const trimmed = goal?.trim();
+    this.goal = trimmed ? trimmed : undefined;
+  }
+
+  getGoal(): string | undefined {
+    return this.goal;
+  }
+
+  private effectiveSystem(): string {
+    return this.goal
+      ? `${this.systemPrompt}\n\n[当前任务目标（用户以 /goal 设定，全程有效，完成前不要偏离）]\n${this.goal}`
+      : this.systemPrompt;
+  }
+
   async run(input: string): Promise<RunResult> {
     this.abortController = new AbortController();
     const { signal } = this.abortController;
@@ -188,7 +210,7 @@ export class AgentSession {
 
   private async callModel(signal: AbortSignal): Promise<ModelResponse> {
     const req: ModelRequest = {
-      system: this.systemPrompt,
+      system: this.effectiveSystem(),
       // 微清理：较老的大体积工具结果替换为占位符（不改会话原数据）
       messages: microCleanMessages(this.state.messages),
       tools: this.registry.toDefs(),
@@ -279,20 +301,32 @@ export class AgentSession {
    */
   private async maybeCompact(): Promise<void> {
     const estimated =
-      estimateTokens(this.systemPrompt) + estimateMessagesTokens(this.state.messages);
+      estimateTokens(this.effectiveSystem()) + estimateMessagesTokens(this.state.messages);
     if (estimated <= this.maxContextTokens * this.compactThreshold) return;
 
-    let summary: string | null = null;
     try {
-      summary = await this.summarize();
+      await this.rebuildWithSummary();
     } catch (err) {
       if (isAbortedError(err)) throw err;
       this.host.emit({
         type: "error",
         message: `上下文压缩失败（${err instanceof Error ? err.message : String(err)}），本次跳过继续任务`,
       });
-      return;
     }
+  }
+
+  /** /compact 手动压缩：跳过阈值判断，直接对当前历史做摘要回填 */
+  async compactNow(): Promise<string> {
+    if (this.state.messages.length === 0) {
+      return "当前没有历史消息，无需压缩。";
+    }
+    return await this.rebuildWithSummary();
+  }
+
+  private async rebuildWithSummary(): Promise<string> {
+    const before =
+      estimateTokens(this.effectiveSystem()) + estimateMessagesTokens(this.state.messages);
+    const summary = await this.summarize();
 
     const kept = this.state.messages.slice(-2);
     const inject: Message = {
@@ -300,11 +334,14 @@ export class AgentSession {
       content: `[系统提示：上下文已压缩。以下是此前进展的结构化摘要，请基于它继续任务]\n\n${summary}`,
     };
     this.state.messages = [inject, ...kept];
-    const note = `已压缩上下文：约 ${estimated} tokens → ${estimateTokens(this.systemPrompt) + estimateMessagesTokens(this.state.messages)} tokens`;
+    const after =
+      estimateTokens(this.effectiveSystem()) + estimateMessagesTokens(this.state.messages);
+    const note = `已压缩上下文：约 ${before} tokens → ${after} tokens`;
     this.host.emit({ type: "compacted", note });
     await this.store
       ?.append({ v: 1, type: "event", event: { type: "compacted", note } })
       .catch(() => {});
+    return note;
   }
 
   /**

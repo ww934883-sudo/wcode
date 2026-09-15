@@ -5,6 +5,7 @@ export type HistoryItem =
   | { kind: "welcome"; text: string }
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
+  | { kind: "note"; text: string }
   | { kind: "tool"; name: string; ok: boolean; summary: string; durationMs: number }
   | { kind: "usage"; tokensIn: number; tokensOut: number }
   | { kind: "todos"; todos: TodoItem[] }

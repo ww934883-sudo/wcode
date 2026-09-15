@@ -19,8 +19,8 @@ import {
   type AgentHost,
 } from "@wcode/core";
 import { FakeProvider, RecordingHost, endTurn, toolUseTurn } from "@wcode/core/testing";
-import { bootstrap } from "./bootstrap";
-import { mapSlashCommand } from "./slash";
+import { bootstrap, createProvider } from "./bootstrap";
+import { handleSlashCommand, type CommandDeps, type CommandSink } from "./commands";
 import { InkHost } from "./ui/ink-host";
 import { App } from "./ui/App";
 
@@ -51,22 +51,41 @@ async function main(): Promise<number> {
   const host = new InkHost();
 
   try {
-    const { session, config, skills } = await bootstrap({ host, overrides, resume });
+    const { session, config, skills, provider } = await bootstrap({ host, overrides, resume });
     host.pushHistory({
       kind: "welcome",
       text:
         `wcode 已就绪 — provider=${config.activeProvider} model=${config.model}` +
         `（权限模式 ${config.permissions.mode}${resume ? "，已恢复上一会话" : ""}` +
-        `${skills.length > 0 ? `，技能 ${skills.map((s) => `/${s.name}`).join(" ")}` : ""}）`,
+        `${skills.length > 0 ? `，技能 ${skills.map((s) => `/${s.name}`).join(" ")}` : ""}）` +
+        " /help 查看命令",
     });
+
+    // 斜杠命令层：内置命令本地处理，/btw 直答有自己的中断控制器
+    const btwAbort: { current: AbortController | null } = { current: null };
+    const sink: CommandSink = {
+      note: (t) => host.pushHistory({ kind: "note", text: t }),
+      assistant: (t) => host.pushHistory({ kind: "assistant", text: t }),
+      error: (t) => host.pushHistory({ kind: "error", text: t }),
+    };
+    const commandDeps: CommandDeps = {
+      session,
+      skills,
+      config,
+      provider,
+      createModelProvider: (model) => createProvider({ ...config, model }),
+      host,
+      btwAbort,
+    };
 
     const app = render(
       <App
         host={host}
         onSubmit={async (raw) => {
-          const text = mapSlashCommand(raw, skills);
+          const cmd = await handleSlashCommand(raw, commandDeps, sink);
+          if (cmd.kind === "handled") return;
           try {
-            const result = await session.run(text);
+            const result = await session.run(cmd.text);
             if (result.status === "max_turns") {
               host.pushHistory({
                 kind: "error",
@@ -79,7 +98,10 @@ async function main(): Promise<number> {
             }
           }
         }}
-        onAbort={() => session.abort()}
+        onAbort={() => {
+          session.abort();
+          btwAbort.current?.abort();
+        }}
       />,
       { exitOnCtrlC: false },
     );

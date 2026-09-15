@@ -25,6 +25,8 @@ function HistoryItemView({ item }: { item: HistoryItem }): React.ReactElement {
       );
     case "assistant":
       return <MarkdownText text={item.text} />;
+    case "note":
+      return <Text dimColor>{item.text}</Text>;
     case "tool":
       return <ToolLine name={item.name} ok={item.ok} summary={item.summary} durationMs={item.durationMs} />;
     case "usage":

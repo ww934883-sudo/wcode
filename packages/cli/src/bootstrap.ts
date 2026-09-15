@@ -68,6 +68,8 @@ export interface Bootstrap {
   session: AgentSession;
   config: WcodeConfig;
   log: Logger;
+  /** 当前激活的 provider（斜杠命令 /btw 直答、/model 切换用） */
+  provider: ModelProvider;
   /** 已发现的技能（供 UI 层做 /技能名 映射） */
   skills: SkillDefinition[];
 }
@@ -196,5 +198,5 @@ export async function bootstrap(options: {
     customAgents: agentsRes.items,
   });
 
-  return { session, config, log, skills: skillsRes.items };
+  return { session, config, log, provider, skills: skillsRes.items };
 }
