@@ -28,6 +28,8 @@ export * from "./mcp/tool-source";
 export * from "./session/state";
 export * from "./session/store";
 export * from "./session/resume";
+export * from "./session/sqlite-store";
+export * from "./session/driver";
 export * from "./loop/agent-session";
 export * from "./prompt/sections";
 export * from "./prompt/agents-md";

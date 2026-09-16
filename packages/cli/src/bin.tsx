@@ -68,11 +68,20 @@ async function main(): Promise<number> {
       : "text";
 
   // 无头自动化模式：wcode -p "任务"（或 -p - 从 stdin 读取，适合管道/CI/定时任务）
+  // 允许 flag 穿插（如 wcode -p -c "跟进"）：prompt 取 -p 之后第一个非 flag 参数
   const printIdx = args.findIndex((a) => a === "-p" || a === "--print");
   if (printIdx >= 0) {
-    let prompt = args[printIdx + 1];
-    if (prompt === "-") prompt = await readStdin();
-    else if (prompt?.startsWith("-")) prompt = undefined;
+    let prompt: string | undefined;
+    for (let i = printIdx + 1; i < args.length; i++) {
+      const a = args[i];
+      if (a === "-") {
+        prompt = await readStdin();
+        break;
+      }
+      if (a?.startsWith("-")) continue; // -c / --mode=... 等 flag，跳过
+      prompt = a;
+      break;
+    }
     if (!prompt?.trim()) {
       console.error('用法: wcode -p "任务描述"（或 wcode -p - 从 stdin 读取任务）');
       return 2;
@@ -85,7 +94,7 @@ async function main(): Promise<number> {
   const host = new InkHost();
 
   try {
-    const { session, config, skills, provider, cwd, sessionsDir, registry, log } =
+    const { session, config, skills, provider, cwd, sessions, registry, log } =
       await bootstrap({ host, overrides, resume });
     host.pushHistory({
       kind: "welcome",
@@ -125,7 +134,7 @@ async function main(): Promise<number> {
       host,
       btwAbort,
       registry,
-      sessionsDir,
+      sessions,
       log,
       reloadRuntime: async () => {
         const snap = await refreshRuntime({

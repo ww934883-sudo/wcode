@@ -7,9 +7,9 @@
     "wcode": "./src/bin.tsx"
   },
   "scripts": {
-    "dev": "tsx src/bin.tsx",
-    "selftest": "tsx src/bin.tsx --selftest",
-    "smoke-ui": "WCODE_UI_SMOKE=1 tsx src/bin.tsx"
+    "dev": "tsx --disable-warning=ExperimentalWarning src/bin.tsx",
+    "selftest": "tsx --disable-warning=ExperimentalWarning src/bin.tsx --selftest",
+    "smoke-ui": "WCODE_UI_SMOKE=1 tsx --disable-warning=ExperimentalWarning src/bin.tsx"
   },
   "dependencies": {
     "@wcode/core": "workspace:*",

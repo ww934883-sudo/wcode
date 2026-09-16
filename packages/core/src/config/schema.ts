@@ -87,6 +87,15 @@ export const configSchema = z.object({
     .default({}),
   /** lifecycle hooks（M2）：见 hooksSchema */
   hooks: hooksSchema.default({ timeoutMs: 30_000, sessionStart: [], preToolUse: [], postToolUse: [] }),
+  /**
+   * 会话存储驱动（设计 §6）：sqlite = 单库 ~/.wcode/wcode.db（默认，要求 Node ≥ 24）；
+   * jsonl = 旧目录扫描行为（老 Node / 求稳回退）。
+   */
+  storage: z
+    .object({
+      type: z.enum(["sqlite", "jsonl"]).default("sqlite"),
+    })
+    .default({ type: "sqlite" }),
 });
 
 export type WcodeConfig = z.infer<typeof configSchema>;

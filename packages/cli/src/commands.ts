@@ -5,15 +5,12 @@ import type {
   Logger,
   ModelProvider,
   ModelRequest,
+  SessionDriver,
   SkillDefinition,
   ToolRegistry,
   WcodeConfig,
 } from "@wcode/core";
-import {
-  JsonlSessionStore,
-  listSessions,
-  messagesFromSessionLines,
-} from "@wcode/core";
+import { messagesFromSessionLines } from "@wcode/core";
 import { mapSlashCommand } from "./slash";
 
 /** 命令输出通道（bin 装配时映射到 InkHost，core 接口不进 UI 层） */
@@ -52,9 +49,9 @@ export interface CommandDeps {
   }>;
   /** /mcp：当前工具注册表（/reload 后由命令层同步替换） */
   registry: ToolRegistry;
-  /** /resume：会话记录目录 */
-  sessionsDir: string;
-  /** /resume 打开会话 store 需要 */
+  /** /resume：会话存储驱动（列表 + 打开） */
+  sessions: SessionDriver;
+  /** 打开 store / 日志需要 */
   log: Logger;
 }
 
@@ -363,7 +360,7 @@ export async function handleSlashCommand(
     }
 
     case "resume": {
-      const sessions = await listSessions(deps.sessionsDir);
+      const sessions = await deps.sessions.listRecent();
       if (sessions.length === 0) {
         sink.note("该目录下没有历史会话记录。");
         return { kind: "handled" };
@@ -389,12 +386,12 @@ export async function handleSlashCommand(
         return { kind: "handled" };
       }
       try {
-        const store = new JsonlSessionStore(target.file, deps.log);
+        const store = await deps.sessions.open(target.sessionId);
         const messages = messagesFromSessionLines(await store.load());
         deps.session.applyResume(store, messages);
         sink.note(
           `已恢复会话 ${target.sessionId}（${messages.length} 条消息）。` +
-            "后续对话将写入该会话记录；当前会话的内容仍保留在其原记录文件中。",
+            "后续对话将写入该会话记录；当前会话的内容仍保留在其原记录中。",
         );
       } catch (err) {
         sink.error(`恢复会话失败: ${errorMessage(err)}`);

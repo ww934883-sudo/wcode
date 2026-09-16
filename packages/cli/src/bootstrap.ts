@@ -1,10 +1,8 @@
-import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   AgentSession,
   ConfigError,
-  JsonlSessionStore,
   PermissionEngine,
   ToolRegistry,
   buildSystemPrompt,
@@ -13,17 +11,16 @@ import {
   createAgentsMdSection,
   createMcpToolSource,
   createSkillsSection,
+  createSessionDriver,
   defaultPromptSections,
   discoverAgents,
   discoverSkills,
   errorMessage,
-  findLatestSessionFile,
   loadAgentsMdFiles,
   loadConfig,
   messagesFromSessionLines,
   parseLogLevel,
   parseRuleString,
-  projectDirHash,
   runHooks,
   type WcodeConfig,
   type CustomAgentDef,
@@ -32,6 +29,8 @@ import {
   type ModelProvider,
   type AgentHost,
   type PromptSection,
+  type SessionDriver,
+  type SessionStore,
   type SkillDefinition,
   type ToolSource,
 } from "@wcode/core";
@@ -175,8 +174,10 @@ export interface Bootstrap {
   skills: SkillDefinition[];
   /** 会话工作目录（/reload 用） */
   cwd: string;
-  /** 会话记录目录（/resume 列表用） */
-  sessionsDir: string;
+  /** 会话存储驱动（/resume 列表与打开） */
+  sessions: SessionDriver;
+  /** 当前会话 id（headless JSON 输出、自动化回链用） */
+  sessionId: string;
   /** 当前工具注册表（/reload 迁移 MCP source 用） */
   registry: ToolRegistry;
   /** CLI 层覆盖（/reload 透传） */
@@ -188,6 +189,8 @@ export async function bootstrap(options: {
   host: AgentHost;
   overrides?: Record<string, unknown>;
   cwd?: string;
+  /** 家目录覆盖（测试隔离 ~/.wcode；缺省 homedir()） */
+  homeDir?: string;
   /** 测试/自检注入假 provider；缺省按配置创建真实 provider */
   provider?: ModelProvider;
   /** 会话恢复：true 接最近一次会话；字符串按 sessionId 恢复 */
@@ -208,33 +211,33 @@ export async function bootstrap(options: {
   const provider =
     options.provider ?? (await createProvider(snap.config));
 
-  // 会话持久化 / 恢复：~/.wcode/projects/<路径哈希>/<时间戳>.jsonl
-  const sessionsDir = join(
-    homedir(),
-    ".wcode",
-    "projects",
-    projectDirHash(cwd),
-  );
-  await mkdir(sessionsDir, { recursive: true }).catch(() => {});
-  let store: JsonlSessionStore;
+  // 会话持久化 / 恢复：driver 按 storage.type 装配（sqlite 默认 / jsonl 回退），
+  // sqlite 首次运行会把旧 JSONL 一次性导入 ~/.wcode/wcode.db（幂等，见设计 §5）
+  const sessions = await createSessionDriver({
+    storageType: snap.config.storage.type,
+    cwd,
+    log,
+    homeDir: options.homeDir,
+  });
+  let store: SessionStore;
+  let sessionId: string;
   let initialMessages: Message[] | undefined;
   if (options.resume) {
-    const file =
+    const id =
       typeof options.resume === "string"
-        ? join(sessionsDir, `${options.resume}.jsonl`)
-        : await findLatestSessionFile(sessionsDir);
-    if (!file) {
-      throw new ConfigError("没有可恢复的会话（该目录下无历史会话文件）");
+        ? options.resume
+        : await sessions.findLatest();
+    if (!id) {
+      throw new ConfigError("没有可恢复的会话（该目录下无历史会话记录）");
     }
-    store = new JsonlSessionStore(file, log);
+    store = await sessions.open(id);
+    sessionId = id;
     initialMessages = messagesFromSessionLines(await store.load());
-    log.info("session.resumed", { file, messages: initialMessages.length });
+    log.info("session.resumed", { sessionId: id, messages: initialMessages.length });
   } else {
-    const sessionId = new Date().toISOString().replace(/[:.]/g, "-");
-    store = new JsonlSessionStore(join(sessionsDir, `${sessionId}.jsonl`), log);
-    await store
-      .append({ v: 1, type: "meta", sessionId, createdAt: new Date().toISOString(), cwd })
-      .catch(() => {});
+    const created = await sessions.createNew({ cwd });
+    store = created.store;
+    sessionId = created.sessionId;
   }
 
   // session_start hooks：失败/超时降级为日志，不阻塞启动
@@ -271,7 +274,8 @@ export async function bootstrap(options: {
     provider,
     skills: snap.skills,
     cwd,
-    sessionsDir,
+    sessions,
+    sessionId,
     registry,
     overrides: options.overrides,
   };

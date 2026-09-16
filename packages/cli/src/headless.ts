@@ -63,37 +63,46 @@ export async function runHeadless(opts: {
   resume?: boolean;
   provider?: ModelProvider;
   cwd?: string;
+  /** 家目录覆盖（测试隔离 ~/.wcode；缺省 homedir()） */
+  homeDir?: string;
   writeStderr?: (line: string) => void;
 }): Promise<HeadlessResult> {
   const outputFormat = opts.outputFormat ?? "text";
   const write = opts.writeStderr ?? ((l: string) => console.error(l));
   const host = new HeadlessHost(write);
   try {
-    const { session, config } = await bootstrap({
+    const { session, config, sessionId, sessions } = await bootstrap({
       host,
       overrides: opts.overrides,
       cwd: opts.cwd,
+      homeDir: opts.homeDir,
       provider: opts.provider,
       resume: opts.resume,
     });
-    const result = await session.run(opts.prompt);
-    if (result.status === "max_turns") {
-      write("[提示] 已达单任务最大轮数，输出为当前进展（不完整）");
+    try {
+      const result = await session.run(opts.prompt);
+      if (result.status === "max_turns") {
+        write("[提示] 已达单任务最大轮数，输出为当前进展（不完整）");
+      }
+      if (outputFormat === "json") {
+        const stdout = JSON.stringify(
+          {
+            status: result.status,
+            reply: result.reply,
+            usage: session.state.cumulativeUsage,
+            model: config.model,
+            sessionId,
+          },
+          null,
+          2,
+        );
+        return { code: 0, stdout, status: result.status, reply: result.reply };
+      }
+      return { code: 0, stdout: result.reply, status: result.status, reply: result.reply };
+    } finally {
+      // 关闭会话库（WAL 检查点）：进程随即退出，且测试可立刻清理临时目录
+      sessions.close();
     }
-    if (outputFormat === "json") {
-      const stdout = JSON.stringify(
-        {
-          status: result.status,
-          reply: result.reply,
-          usage: session.state.cumulativeUsage,
-          model: config.model,
-        },
-        null,
-        2,
-      );
-      return { code: 0, stdout, status: result.status, reply: result.reply };
-    }
-    return { code: 0, stdout: result.reply, status: result.status, reply: result.reply };
   } catch (err) {
     write(`出错: ${errorMessage(err)}`);
     return { code: err instanceof ConfigError ? 2 : 1, stdout: "" };

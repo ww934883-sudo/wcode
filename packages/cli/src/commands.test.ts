@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   ToolRegistry,
   configSchema,
   createFileLogger,
+  createSessionDriver,
   readTool,
   sourceOf,
 } from "@wcode/core";
@@ -82,7 +83,11 @@ async function makeDeps(
     host,
     btwAbort: { current: null },
     registry,
-    sessionsDir: await mkdtemp(join(tmpdir(), "wcode-cmd-sessions-")),
+    sessions: await createSessionDriver({
+      storageType: "sqlite",
+      cwd: "/cmd-test-project",
+      homeDir: await mkdtemp(join(tmpdir(), "wcode-cmd-sessions-")),
+    }),
     log: createFileLogger({ level: "error" }),
     reloadRuntime: async () => ({
       config,
@@ -338,25 +343,24 @@ describe("handleSlashCommand", () => {
     await deps.session.run("当前会话的问题");
     expect(session.state.messages).toHaveLength(2);
 
-    // 写两个历史会话文件
-    const jsonl = (lines: string[]) => lines.join("\n") + "\n";
-    await writeFile(
-      join(deps.sessionsDir, "2026-09-15T08-00-00-000Z.jsonl"),
-      jsonl([
-        JSON.stringify({ v: 1, type: "meta", sessionId: "s-a", createdAt: "t", cwd: "/x" }),
-        JSON.stringify({ v: 1, type: "message", message: { role: "user", content: "历史会话一的问题" } }),
-        JSON.stringify({ v: 1, type: "message", message: { role: "assistant", text: "答一", toolCalls: [] } }),
-      ]),
-      "utf8",
-    );
-    await writeFile(
-      join(deps.sessionsDir, "2026-09-15T09-00-00-000Z.jsonl"),
-      jsonl([
-        JSON.stringify({ v: 1, type: "meta", sessionId: "s-b", createdAt: "t", cwd: "/x" }),
-        JSON.stringify({ v: 1, type: "message", message: { role: "user", content: "历史会话二的问题" } }),
-      ]),
-      "utf8",
-    );
+    // 经存储驱动造两个历史会话（createNew 已写 meta）
+    const s1 = await deps.sessions.createNew({ cwd: "/x" });
+    await s1.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "user", content: "历史会话一的问题" },
+    });
+    await s1.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "assistant", text: "答一", toolCalls: [] },
+    });
+    const s2 = await deps.sessions.createNew({ cwd: "/x" });
+    await s2.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "user", content: "历史会话二的问题" },
+    });
 
     const { sink, assistant, notes, errors } = makeSink();
     await handleSlashCommand("/resume", deps, sink);
@@ -365,7 +369,7 @@ describe("handleSlashCommand", () => {
 
     const out = await handleSlashCommand("/resume 1", deps, sink);
     expect(out.kind).toBe("handled");
-    expect(notes[0]).toContain("已恢复会话");
+    expect(notes[0]).toContain(`已恢复会话 ${s2.sessionId}`);
     expect(session.state.messages).toHaveLength(1); // 替换为历史会话的消息
     const first = session.state.messages[0];
     expect(first?.role === "user" && first.content).toBe("历史会话二的问题");

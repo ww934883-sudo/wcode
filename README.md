@@ -1,6 +1,6 @@
 # wcode
 
-运行在终端里的编程 Agent（类 Claude Code / ZCode 形态）。Monorepo，TypeScript + Node.js ≥ 20。
+运行在终端里的编程 Agent（类 Claude Code / ZCode 形态）。Monorepo，TypeScript + Node.js ≥ 24（node:sqlite 会话库要求；Node 20/22 老环境可在 settings.json 配 storage.type="jsonl" 回退）。
 
 ## 结构与依赖铁律
 
@@ -77,7 +77,7 @@ provider `type` 支持三种协议（同一套工具/权限/上下文机制，�
 
 权限模式：`plan`（只读）/ `default`（变更需确认）/ `acceptEdits`（文件编辑放行）/ `bypass`（全放行）。
 规则格式 `Tool(pattern)`，pattern 走 glob（`**` 跨目录、`*` 不跨目录）。
-调试日志：`WCODE_LOG=debug`，落盘 `~/.wcode/logs/`；会话记录 `~/.wcode/projects/<路径哈希>/`。
+调试日志：`WCODE_LOG=debug`，落盘 `~/.wcode/logs/`；会话记录默认存 SQLite 单库 `~/.wcode/wcode.db`（WAL，按项目哈希分区；首次启动自动导入旧 JSONL 且不删原文件），`storage.type: "jsonl"` 时走 `~/.wcode/projects/<路径哈希>/` 旧目录形态。
 
 ## 设计文档
 
@@ -93,12 +93,12 @@ provider `type` 支持三种协议（同一套工具/权限/上下文机制，�
   权限继承且可收紧，过程事件转发 UI，结果只回传结论
 - **MCP 接入**：官方 SDK，`mcpServers` 配置，工具命名空间化 `mcp__<server>__<tool>`，
   连接失败降级跳过；InMemoryTransport 契约测试
-- **会话恢复**：`wcode --continue` 接最近一次会话（JSONL 重放）
+- **会话恢复**：`wcode --continue` 接最近一次会话（存储重放；SQLite/jsonl 双实现契约对拍）
 - 上下文管理：微清理（旧工具结果占位）+ 自动压缩（结构化摘要回填）
 - AGENTS.md 项目记忆（兼容 CLAUDE.md）、Todo 清单、diff 确认
 - 工具执行管道（Hooks → 权限 → schema 校验 → 执行 → 截断 → 审计）
 - provider-anthropic（SSE 流解析、tool_use 增量拼接、图像块映射、错误分类）
-- JSONL 会话持久化、脱敏日志、分层配置
+- SQLite 会话持久化（`node:sqlite` 零依赖、schema_migration 版本化迁移、JSONL→SQLite 幂等导入、`storage.type` 开关）、脱敏日志、分层配置
 - ink TUI 组件化渲染（Static 回滚区 + 流式 markdown + diff 弹窗 + todo 快照）
 - 评测集 20 任务（glm-5.3-flash 实跑 20/20 基线）
 - **Skills**：`skill` 工具按需加载指令，系统提示只放清单（渐进披露），`/技能名` 直接调用
@@ -107,7 +107,7 @@ provider `type` 支持三种协议（同一套工具/权限/上下文机制，�
 - **自定义子 Agent**：`.wcode/agents/*.md` 定义专属子 Agent（正文=system prompt，
   tools=工具白名单），task 工具按名字派生
 
-测试与门禁：150 用例全绿；dependency-cruiser 依赖单向门禁；四包严格 TS；
+测试与门禁：205 用例全绿；dependency-cruiser 依赖单向门禁；四包严格 TS；
 `wcode --selftest` 无网络自检；`WCODE_UI_SMOKE=1 pnpm dev` UI 渲染管线冒烟。
 
 ## TUI（ink 组件化）
@@ -128,7 +128,7 @@ InkHost 是 AgentHost 的第二个实现（接缝三），core 零改动。
 wcode -p "运行 pnpm test 并修复失败用例"        # 直接执行
 echo "总结今天的 git log" | wcode -p -          # 任务从 stdin 读（管道）
 git diff | wcode -p - "审查这段 diff 的安全问题"
-wcode -p --output-format=json "检查依赖"        # JSON 输出 {status, reply, usage, model}
+wcode -p --output-format=json "检查依赖"        # JSON 输出 {status, reply, usage, model, sessionId}
 wcode -p -c "跟进上一会话的任务"                 # 无头续跑最近会话（配定时任务用）
 ```
 

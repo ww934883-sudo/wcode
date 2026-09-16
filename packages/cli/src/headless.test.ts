@@ -31,6 +31,7 @@ async function headless(
       outputFormat: opts?.outputFormat,
       provider,
       cwd: t.dir,
+      homeDir: t.dir,
       writeStderr: stderr.write,
     });
     return { ...result, stderr: stderr.lines };
@@ -62,6 +63,7 @@ describe("runHeadless（无头自动化模式）", () => {
         prompt: "读文件",
         provider,
         cwd: t.dir,
+        homeDir: t.dir,
         writeStderr: (l) => stderr.push(l),
       });
       expect(result.code).toBe(0);
@@ -85,7 +87,7 @@ describe("runHeadless（无头自动化模式）", () => {
     expect(r.stdout).toContain("写入被拒");
   });
 
-  it("json 模式输出 status/reply/usage/model", async () => {
+  it("json 模式输出 status/reply/usage/model/sessionId", async () => {
     const r = await headless([{ response: endTurn("JSON 回复") }], { outputFormat: "json" });
     expect(r.code).toBe(0);
     const parsed = JSON.parse(r.stdout) as {
@@ -93,11 +95,13 @@ describe("runHeadless（无头自动化模式）", () => {
       reply: string;
       usage: { inputTokens: number; outputTokens: number };
       model: string;
+      sessionId: string;
     };
     expect(parsed.status).toBe("end_turn");
     expect(parsed.reply).toBe("JSON 回复");
     expect(parsed.usage.inputTokens).toBeGreaterThan(0);
     expect(typeof parsed.model).toBe("string");
+    expect(parsed.sessionId).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("模型运行错误 → 退出码 1 且 stderr 报错", async () => {

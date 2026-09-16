@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JsonlSessionStore } from "./store";
-import { findLatestSessionFile, listSessions, messagesFromSessionLines } from "./resume";
+import { messagesFromSessionLines } from "./resume";
 import { AgentSession } from "../loop/agent-session";
 import { ToolRegistry, sourceOf } from "../tools/registry";
 import { readTool } from "../tools/builtin/read";
@@ -33,15 +33,15 @@ describe("会话恢复", () => {
     }
   });
 
-  it("findLatestSessionFile 按文件名（时间戳）取最新", async () => {
+  it("findLatest 按文件名（时间戳）取最新；目录不存在返回 null", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wcode-resume-"));
     try {
-      const { writeFile } = await import("node:fs/promises");
+      const probe = new JsonlSessionStore(join(dir, "probe.jsonl"));
       await writeFile(join(dir, "2026-09-15T10-00-00-000Z.jsonl"), "{}\n", "utf8");
       await writeFile(join(dir, "2026-09-15T11-00-00-000Z.jsonl"), "{}\n", "utf8");
-      const latest = await findLatestSessionFile(dir);
-      expect(latest?.endsWith("2026-09-15T11-00-00-000Z.jsonl")).toBe(true);
-      expect(await findLatestSessionFile(join(dir, "none"))).toBeNull();
+      expect(await probe.findLatest()).toBe("2026-09-15T11-00-00-000Z");
+      const missing = new JsonlSessionStore(join(dir, "none", "probe.jsonl"));
+      expect(await missing.findLatest()).toBeNull();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -89,7 +89,7 @@ const assistantLine = (text: string) =>
     message: { role: "assistant", text, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } },
   });
 
-describe("listSessions（/resume 列表）", () => {
+describe("listRecent（/resume 列表，jsonl 目录扫描实现）", () => {
   it("按新→旧列出，解析消息数、meta 与首条用户消息预览", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wcode-resume-list-"));
     try {
@@ -105,7 +105,8 @@ describe("listSessions（/resume 列表）", () => {
       );
       await writeFile(join(dir, "notes.txt"), "非 jsonl 忽略", "utf8");
 
-      const sessions = await listSessions(dir);
+      const probe = new JsonlSessionStore(join(dir, "probe.jsonl"));
+      const sessions = await probe.listRecent();
       expect(sessions).toHaveLength(2);
       expect(sessions[0]?.sessionId).toBe("2026-09-15T14-00-00-000Z"); // 新的在前
       expect(sessions[0]?.messageCount).toBe(2);
@@ -127,10 +128,12 @@ describe("listSessions（/resume 列表）", () => {
         "utf8",
       );
       await writeFile(join(dir, "2026-09-15T07-00-00-000Z.jsonl"), "", "utf8");
-      const sessions = await listSessions(dir, 1);
+      const probe = new JsonlSessionStore(join(dir, "probe.jsonl"));
+      const sessions = await probe.listRecent(1);
       expect(sessions).toHaveLength(1);
       expect(sessions[0]?.messageCount).toBe(1); // 损坏行跳过
-      expect(await listSessions(join(dir, "nope"))).toEqual([]);
+      const missing = new JsonlSessionStore(join(dir, "nope", "probe.jsonl"));
+      expect(await missing.listRecent()).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
     }
