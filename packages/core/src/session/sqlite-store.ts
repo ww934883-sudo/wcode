@@ -3,9 +3,16 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { errorMessage } from "../errors";
 import type { Logger } from "../logging/port";
-import type { Message } from "../types";
 import { runMigrations } from "./migrations";
-import type { SessionLine, SessionStore, SessionSummary } from "./store";
+import {
+  excerptOf,
+  messageSearchText,
+  type SessionLine,
+  type SessionSearchHit,
+  type SessionStats,
+  type SessionStore,
+  type SessionSummary,
+} from "./store";
 
 /**
  * SQLite 会话存储（设计 §2/§4）：node:sqlite 零依赖实现，要求 Node ≥ 24。
@@ -91,15 +98,6 @@ export function previewOf(text: string): string {
   return text.replace(/\s+/g, " ").slice(0, 60);
 }
 
-/** Message → (role, text 提取列)。text 供检索，payload 才是权威。 */
-function extractText(message: Message): string | null {
-  if (message.role === "user") {
-    return typeof message.content === "string" ? message.content : null;
-  }
-  if (message.role === "assistant") return message.text;
-  return message.results.map((r) => r.content).join("\n") || null;
-}
-
 function inTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -154,7 +152,7 @@ export class SqliteSessionStore implements SessionStore {
 
     // message：INSERT + sessions 计数/token 更新 = 单事务（设计 §4）
     const message = line.message;
-    const text = extractText(message);
+    const text = messageSearchText(message);
     inTransaction(db, () => {
       const idx = Number(
         (
@@ -264,5 +262,55 @@ export class SqliteSessionStore implements SessionStore {
       )
       .get(this.ctx.projectHash) as { id: string } | undefined;
     return row?.id ?? null;
+  }
+
+  /** LIKE 检索提取列 text（%/_/\\ 字面转义）；新会话在前，消息级命中 */
+  async search(keyword: string, limit = 10): Promise<SessionSearchHit[]> {
+    const kw = keyword.trim();
+    if (!kw) return [];
+    const pattern = `%${kw.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const rows = this.ctx.db
+      .prepare(
+        `SELECT s.id AS sid, s.created_at AS created_at, s.message_count AS mc,
+                m.idx AS idx, m.role AS role, m.text AS text
+         FROM messages m JOIN sessions s ON s.id = m.session_id
+         WHERE s.project_hash = ? AND m.text LIKE ? ESCAPE '\\'
+         ORDER BY s.updated_at DESC, s.id DESC, m.idx ASC
+         LIMIT ?`,
+      )
+      .all(this.ctx.projectHash, pattern, limit) as {
+      sid: string;
+      created_at: number;
+      mc: number;
+      idx: number;
+      role: string;
+      text: string | null;
+    }[];
+    return rows.map((r) => ({
+      sessionId: r.sid,
+      createdAt: iso(Number(r.created_at)),
+      messageCount: Number(r.mc),
+      messageIndex: Number(r.idx) + 1,
+      role: String(r.role),
+      excerpt: excerptOf(String(r.text ?? ""), kw),
+    }));
+  }
+
+  async stats(): Promise<SessionStats> {
+    const row = this.ctx.db
+      .prepare(
+        `SELECT COUNT(*) AS sc,
+                COALESCE(SUM(message_count), 0) AS mc,
+                COALESCE(SUM(input_tokens), 0) AS it,
+                COALESCE(SUM(output_tokens), 0) AS ot
+         FROM sessions WHERE project_hash = ?`,
+      )
+      .get(this.ctx.projectHash) as { sc: number; mc: number; it: number; ot: number };
+    return {
+      sessionCount: Number(row.sc),
+      messageCount: Number(row.mc),
+      inputTokens: Number(row.it),
+      outputTokens: Number(row.ot),
+    };
   }
 }

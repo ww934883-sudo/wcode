@@ -6,6 +6,7 @@ import type {
   ModelProvider,
   ModelRequest,
   SessionDriver,
+  SessionSummary,
   SkillDefinition,
   ToolRegistry,
   WcodeConfig,
@@ -49,8 +50,13 @@ export interface CommandDeps {
   }>;
   /** /mcp：当前工具注册表（/reload 后由命令层同步替换） */
   registry: ToolRegistry;
-  /** /resume：会话存储驱动（列表 + 打开） */
+  /** /resume：会话存储驱动（列表 / 搜索 / 打开 / 统计） */
   sessions: SessionDriver;
+  /**
+   * /resume <序号> 的解析上下文：最近一次展示的会话列表
+   * （/resume 无参或 /sessions 搜索时更新），使搜索结果可以直接按序号恢复
+   */
+  lastListing?: SessionSummary[];
   /** 打开 store / 日志需要 */
   log: Logger;
 }
@@ -72,6 +78,8 @@ const HELP_TEXT = [
   "- **/goal** [目标] — 查看/设定任务目标（压缩后依然有效）；**/goal clear** 清除",
   "- **/reload** — 热重载配置、权限规则、hooks、技能与子 Agent 定义（无需重启）",
   "- **/mcp** [名称] — 查看 MCP 服务器连接状态与工具（/reload 重试连接）",
+  "- **/sessions** [关键词] — 无参列出最近会话；带关键词跨会话搜索消息（/resume <序号> 恢复命中会话）",
+  "- **/stats** — 本项目的会话数 / 消息数 / 累计 token 用量",
   "- **/resume** [序号] — 列出并恢复历史会话",
   "- **/quit**、**/exit** — 退出 wcode",
   "",
@@ -340,6 +348,69 @@ export async function handleSlashCommand(
       return { kind: "handled" };
     }
 
+    case "sessions": {
+      const kw = args.trim();
+      if (!kw) {
+        // 无参 = 最近会话列表（与 /resume 无参一致）
+        const sessions = await deps.sessions.listRecent();
+        if (sessions.length === 0) {
+          sink.note("该目录下没有历史会话记录。");
+          return { kind: "handled" };
+        }
+        deps.lastListing = sessions;
+        const lines = sessions.map(
+          (s, i) =>
+            `${i + 1}. ${s.sessionId} · ${s.messageCount} 条消息 · ${s.preview || "（无预览）"}`,
+        );
+        sink.assistant(
+          `最近的会话（/resume <序号> 恢复，当前会话也在列表中）：\n\n${lines.join("\n")}`,
+        );
+        return { kind: "handled" };
+      }
+      const hits = await deps.sessions.search(kw);
+      if (hits.length === 0) {
+        sink.note(`没有会话包含「${kw}」。`);
+        return { kind: "handled" };
+      }
+      // 按会话分组展示；序号 = 分组序号，/resume <序号> 直接恢复对应会话
+      const groups = new Map<string, { summary: SessionSummary; hits: string[] }>();
+      for (const h of hits) {
+        let g = groups.get(h.sessionId);
+        if (!g) {
+          g = {
+            summary: {
+              sessionId: h.sessionId,
+              createdAt: h.createdAt,
+              messageCount: h.messageCount,
+              preview: h.excerpt,
+            },
+            hits: [],
+          };
+          groups.set(h.sessionId, g);
+        }
+        g.hits.push(`   [${h.role} #${h.messageIndex}] ${h.excerpt}`);
+      }
+      const list = [...groups.values()];
+      deps.lastListing = list.map((g) => g.summary);
+      const blocks = list.map((g, i) => {
+        const date = g.summary.createdAt ? ` · ${g.summary.createdAt.slice(0, 10)}` : "";
+        return [`${i + 1}. ${g.summary.sessionId} · ${g.summary.messageCount} 条消息${date}`, ...g.hits].join("\n");
+      });
+      sink.assistant(
+        `包含「${kw}」的会话（${list.length} 个，/resume <序号> 恢复）：\n\n${blocks.join("\n")}`,
+      );
+      return { kind: "handled" };
+    }
+
+    case "stats": {
+      const s = await deps.sessions.stats();
+      sink.note(
+        `本项目存储：${s.sessionCount} 个会话 · ${s.messageCount} 条消息 · ` +
+          `累计输入 ${s.inputTokens} / 输出 ${s.outputTokens} token`,
+      );
+      return { kind: "handled" };
+    }
+
     case "reload": {
       try {
         const snap = await deps.reloadRuntime();
@@ -360,12 +431,13 @@ export async function handleSlashCommand(
     }
 
     case "resume": {
-      const sessions = await deps.sessions.listRecent();
+      const sessions = deps.lastListing ?? (await deps.sessions.listRecent());
       if (sessions.length === 0) {
         sink.note("该目录下没有历史会话记录。");
         return { kind: "handled" };
       }
       if (!args) {
+        deps.lastListing = sessions; // 序号上下文：/resume <序号> 与本次列表对应
         const lines = sessions.map(
           (s, i) =>
             `${i + 1}. ${s.sessionId} · ${s.messageCount} 条消息 · ${s.preview || "（无预览）"}`,

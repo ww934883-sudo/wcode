@@ -8,6 +8,8 @@ import {
   jsonlSessionPath,
   JsonlSessionStore,
   projectDirHash,
+  type SessionSearchHit,
+  type SessionStats,
   type SessionStore,
   type SessionSummary,
 } from "./store";
@@ -26,6 +28,10 @@ export interface SessionDriver {
   open(sessionId: string): Promise<SessionStore>;
   /** 新建会话并立即落 meta；返回生成的 sessionId */
   createNew(init: { cwd: string }): Promise<{ sessionId: string; store: SessionStore }>;
+  /** 跨会话关键词搜索（W-b /sessions <关键词>）：消息级命中，新会话在前 */
+  search(keyword: string, limit?: number): Promise<SessionSearchHit[]>;
+  /** 用量统计（W-b /stats）：本项目聚合 */
+  stats(): Promise<SessionStats>;
   /** 释放底层资源（sqlite 关连接并做 WAL 检查点；jsonl 无操作） */
   close(): void;
 }
@@ -58,6 +64,8 @@ export async function createSessionDriver(
     return {
       listRecent: (limit) => index.listRecent(limit),
       findLatest: () => index.findLatest(),
+      search: (keyword, limit) => index.search(keyword, limit),
+      stats: () => index.stats(),
       open: async (sessionId) =>
         new SqliteSessionStore({ db, sessionId, projectHash, cwd: opts.cwd, log }),
       createNew: async (init) => {
@@ -84,6 +92,8 @@ export async function createSessionDriver(
   return {
     listRecent: (limit) => index.listRecent(limit),
     findLatest: () => index.findLatest(),
+    search: (keyword, limit) => index.search(keyword, limit),
+    stats: () => index.stats(),
     open: async (sessionId) => new JsonlSessionStore(jsonlSessionPath(sessionsDir, sessionId), log),
     createNew: async (init) => {
       const sessionId = newSessionId();

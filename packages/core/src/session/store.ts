@@ -19,6 +19,27 @@ export interface SessionSummary {
   preview: string;
 }
 
+/** 跨会话搜索命中（W-b /sessions <关键词>） */
+export interface SessionSearchHit {
+  sessionId: string;
+  createdAt?: string;
+  messageCount: number;
+  /** 命中消息的会话内序号（1 起） */
+  messageIndex: number;
+  /** user | assistant | tool_result */
+  role: string;
+  /** 关键词附近摘录（约 60 字） */
+  excerpt: string;
+}
+
+/** 会话用量统计（W-b /stats），按项目（存储分区）聚合 */
+export interface SessionStats {
+  sessionCount: number;
+  messageCount: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface SessionStore {
   append(line: SessionLine): Promise<void>;
   /** resume 时重放；损坏行跳过并告警，不阻塞恢复 */
@@ -30,6 +51,36 @@ export interface SessionStore {
   listRecent?(limit?: number): Promise<SessionSummary[]>;
   /** --continue：最近一次会话的 sessionId；无历史返回 null */
   findLatest?(): Promise<string | null>;
+  /** 跨会话关键词搜索（W-b）：命中消息级条目，新会话在前 */
+  search?(keyword: string, limit?: number): Promise<SessionSearchHit[]>;
+  /** 用量统计（W-b /stats）：本项目聚合 */
+  stats?(): Promise<SessionStats>;
+}
+
+/**
+ * 消息的检索文本（提取列语义，两实现共用）：user 字符串内容 / assistant 文本 /
+ * tool_result 结果拼接。payload 才是权威数据，这里只为搜索。
+ */
+export function messageSearchText(message: Message): string | null {
+  if (message.role === "user") {
+    return typeof message.content === "string" ? message.content : null;
+  }
+  if (message.role === "assistant") return message.text;
+  return message.results.map((r) => r.content).join("\n") || null;
+}
+
+/** 关键词附近摘录：定位（忽略大小写）后取前后各 20 字，折叠空白 */
+export function excerptOf(text: string, keyword: string): string {
+  const collapsed = text.replace(/\s+/g, " ");
+  const i = collapsed.toLowerCase().indexOf(keyword.toLowerCase());
+  if (i < 0) return collapsed.slice(0, 60);
+  const start = Math.max(0, i - 20);
+  const end = Math.min(collapsed.length, i + keyword.length + 20);
+  return (
+    (start > 0 ? "…" : "") +
+    collapsed.slice(start, end) +
+    (end < collapsed.length ? "…" : "")
+  );
 }
 
 export class JsonlSessionStore implements SessionStore {
@@ -110,6 +161,103 @@ export class JsonlSessionStore implements SessionStore {
       });
     }
     return summaries;
+  }
+
+  /** 目录扫描兜底实现：逐文件逐消息匹配关键词（与 sqlite 的提取列语义一致） */
+  async search(keyword: string, limit = 10): Promise<SessionSearchHit[]> {
+    const kw = keyword.trim();
+    if (!kw) return [];
+    const dir = dirname(this.filePath);
+    const files = (await sortedSessionFiles(dir)).reverse();
+    const lower = kw.toLowerCase();
+    const hits: SessionSearchHit[] = [];
+    for (const file of files) {
+      if (hits.length >= limit) break;
+      let createdAt: string | undefined;
+      let messageCount = 0;
+      // 命中先攒着，文件解析完拿到消息总数再回填 messageCount
+      const pending: { messageIndex: number; role: string; searchable: string }[] = [];
+      try {
+        const text = await readFile(join(dir, file), "utf8");
+        for (const line of text.split("\n")) {
+          const t = line.trim();
+          if (!t) continue;
+          let parsed: SessionLine;
+          try {
+            parsed = JSON.parse(t) as SessionLine;
+          } catch {
+            continue; // 损坏行跳过
+          }
+          if (parsed.type === "meta") {
+            createdAt = parsed.createdAt;
+            continue;
+          }
+          if (parsed.type !== "message") continue;
+          messageCount++;
+          const searchable = messageSearchText(parsed.message);
+          if (searchable && searchable.toLowerCase().includes(lower)) {
+            pending.push({
+              messageIndex: messageCount,
+              role: parsed.message.role,
+              searchable,
+            });
+          }
+        }
+      } catch {
+        continue; // 不可读文件跳过
+      }
+      for (const p of pending) {
+        if (hits.length >= limit) break;
+        hits.push({
+          sessionId: file.replace(/\.jsonl$/, ""),
+          createdAt,
+          messageCount,
+          messageIndex: p.messageIndex,
+          role: p.role,
+          excerpt: excerptOf(p.searchable, kw),
+        });
+      }
+    }
+    return hits;
+  }
+
+  /** 目录扫描兜底实现：逐文件累加会话数/消息数/用量 */
+  async stats(): Promise<SessionStats> {
+    const dir = dirname(this.filePath);
+    const files = await sortedSessionFiles(dir);
+    const out: SessionStats = {
+      sessionCount: 0,
+      messageCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+    for (const file of files) {
+      out.sessionCount++;
+      try {
+        const text = await readFile(join(dir, file), "utf8");
+        for (const line of text.split("\n")) {
+          const t = line.trim();
+          if (!t) continue;
+          let parsed: SessionLine;
+          try {
+            parsed = JSON.parse(t) as SessionLine;
+          } catch {
+            continue;
+          }
+          if (parsed.type !== "message") continue;
+          out.messageCount++;
+          const usage =
+            parsed.message.role === "assistant" ? parsed.message.usage : undefined;
+          if (usage) {
+            out.inputTokens += usage.inputTokens;
+            out.outputTokens += usage.outputTokens;
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+    return out;
   }
 
   /** 文件名含 ISO 时间戳，字典序即时间序；返回最近的 sessionId */

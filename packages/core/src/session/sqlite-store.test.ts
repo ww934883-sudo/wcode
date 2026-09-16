@@ -161,3 +161,123 @@ describe("SqliteSessionStore", () => {
     expect(runMigrations(db)).toEqual([]);
   });
 });
+
+describe("搜索与统计（W-b 契约对拍）", () => {
+  async function seedDriver(driver: SessionDriver): Promise<{ s1: string; s2: string }> {
+    const s1 = await driver.createNew({ cwd: "/proj" });
+    await s1.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "user", content: "帮我修复登录 bug，页面 100%_done 了还是报错" },
+    });
+    await s1.store.append({
+      v: 1,
+      type: "message",
+      message: {
+        role: "assistant",
+        text: "已定位是 token 过期",
+        toolCalls: [],
+        usage: { inputTokens: 7, outputTokens: 3 },
+      },
+    });
+    const s2 = await driver.createNew({ cwd: "/proj" });
+    await s2.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "user", content: "写个 TODO 应用" },
+    });
+    await s2.store.append({
+      v: 1,
+      type: "message",
+      message: {
+        role: "tool_result",
+        results: [{ callId: "c1", content: "文件已写入 TODO.md", isError: false }],
+      },
+    });
+    return { s1: s1.sessionId, s2: s2.sessionId };
+  }
+
+  it("search：命中/摘录/序号两实现一致；LIKE 通配符按字面匹配；空关键词返回空", async () => {
+    const jsonlHome = await mkdtemp(join(tmpdir(), "wcode-sch-j-"));
+    const sqliteHome = await mkdtemp(join(tmpdir(), "wcode-sch-s-"));
+    const jd = await createSessionDriver({ storageType: "jsonl", cwd: "/proj", homeDir: jsonlHome });
+    const sd = await createSessionDriver({ storageType: "sqlite", cwd: "/proj", homeDir: sqliteHome });
+    try {
+      const jIds = await seedDriver(jd);
+      const sIds = await seedDriver(sd);
+
+      const jHits = await jd.search("登录");
+      const sHits = await sd.search("登录");
+      // 对拍：会话 id 与时间戳属各次运行，不可比；其余字段必须一致
+      const shape = (hits: Awaited<ReturnType<SessionDriver["search"]>>) =>
+        hits.map((h) => ({
+          messageCount: h.messageCount,
+          messageIndex: h.messageIndex,
+          role: h.role,
+          excerpt: h.excerpt,
+        }));
+      expect(shape(sHits)).toEqual(shape(jHits));
+      expect(sHits).toHaveLength(1);
+      expect(sHits[0]?.sessionId).toBe(sIds.s1);
+      expect(sHits[0]?.messageIndex).toBe(1);
+      expect(sHits[0]?.role).toBe("user");
+      expect(sHits[0]?.excerpt).toContain("登录");
+
+      // tool_result 也在检索范围（提取列语义一致）
+      expect((await sd.search("TODO.md"))[0]?.role).toBe("tool_result");
+      expect((await jd.search("TODO.md"))[0]?.role).toBe("tool_result");
+
+      // assistant 文本命中 → 摘录取关键词附近
+      const aHit = (await sd.search("token 过期"))[0];
+      expect(aHit?.role).toBe("assistant");
+      expect(aHit?.excerpt).toContain("token 过期");
+
+      // LIKE 通配符按字面匹配（% 与 _ 已转义）
+      expect(await sd.search("100%_done")).toHaveLength(1);
+      expect(await jd.search("100%_done")).toHaveLength(1);
+
+      expect(await sd.search("不存在的词xyz")).toEqual([]);
+      expect(await sd.search("   ")).toEqual([]);
+      expect((await sd.search("登录", 0))).toEqual([]); // limit=0
+    } finally {
+      jd.close();
+      sd.close();
+      await rm(jsonlHome, { recursive: true, force: true }).catch(() => {});
+      await rm(sqliteHome, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("stats：两实现计数与用量一致", async () => {
+    const jsonlHome = await mkdtemp(join(tmpdir(), "wcode-sta-j-"));
+    const sqliteHome = await mkdtemp(join(tmpdir(), "wcode-sta-s-"));
+    const jd = await createSessionDriver({ storageType: "jsonl", cwd: "/proj", homeDir: jsonlHome });
+    const sd = await createSessionDriver({ storageType: "sqlite", cwd: "/proj", homeDir: sqliteHome });
+    try {
+      await seedDriver(jd);
+      await seedDriver(sd);
+      const j = await jd.stats();
+      const s = await sd.stats();
+      expect(s).toEqual(j);
+      expect(s).toEqual({
+        sessionCount: 2,
+        messageCount: 4,
+        inputTokens: 7,
+        outputTokens: 3,
+      });
+      // 项目隔离：其他项目统计为 0
+      const other = await createSessionDriver({ storageType: "sqlite", cwd: "/other", homeDir: sqliteHome });
+      expect(await other.stats()).toEqual({
+        sessionCount: 0,
+        messageCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      other.close();
+    } finally {
+      jd.close();
+      sd.close();
+      await rm(jsonlHome, { recursive: true, force: true }).catch(() => {});
+      await rm(sqliteHome, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});

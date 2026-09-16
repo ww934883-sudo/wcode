@@ -384,4 +384,71 @@ describe("handleSlashCommand", () => {
     await handleSlashCommand("/resume", deps, sink);
     expect(notes[0]).toContain("没有历史会话");
   });
+
+  it("/sessions 关键词搜索命中，/resume <序号> 直接恢复命中会话", async () => {
+    const { deps, session } = await makeDeps([{ response: endTurn("ok") }]);
+    const a = await deps.sessions.createNew({ cwd: "/x" });
+    await a.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "user", content: "帮我修复登录 bug，急" },
+    });
+    const b = await deps.sessions.createNew({ cwd: "/x" });
+    await b.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "user", content: "写个爬虫" },
+    });
+
+    const { sink, assistant } = makeSink();
+    const out = await handleSlashCommand("/sessions 登录", deps, sink);
+    expect(out.kind).toBe("handled");
+    expect(assistant[0]).toContain("帮我修复登录 bug，急");
+    expect(assistant[0]).toContain(a.sessionId);
+    expect(assistant[0]).not.toContain(b.sessionId);
+
+    // 搜索结果的序号直接对应 /resume（lastListing 上下文）
+    await handleSlashCommand("/resume 1", deps, sink);
+    const first = session.state.messages[0];
+    expect(first?.role === "user" && first.content).toBe("帮我修复登录 bug，急");
+  });
+
+  it("/sessions 无命中提示；无参列出最近会话", async () => {
+    const { deps } = await makeDeps();
+    const s1 = makeSink();
+    await handleSlashCommand("/sessions 不存在的词xyz", deps, s1.sink);
+    expect(s1.notes[0]).toContain("没有会话包含");
+
+    const s = await deps.sessions.createNew({ cwd: "/x" });
+    await s.store.append({
+      v: 1,
+      type: "message",
+      message: { role: "user", content: "历史问题" },
+    });
+    const s2 = makeSink();
+    await handleSlashCommand("/sessions", deps, s2.sink);
+    expect(s2.assistant[0]).toContain("最近的会话");
+    expect(s2.assistant[0]).toContain("历史问题");
+  });
+
+  it("/stats 输出会话/消息/token 统计", async () => {
+    const { deps } = await makeDeps();
+    const s = await deps.sessions.createNew({ cwd: "/x" });
+    await s.store.append({
+      v: 1,
+      type: "message",
+      message: {
+        role: "assistant",
+        text: "答",
+        toolCalls: [],
+        usage: { inputTokens: 11, outputTokens: 5 },
+      },
+    });
+    const { sink, notes } = makeSink();
+    await handleSlashCommand("/stats", deps, sink);
+    expect(notes[0]).toContain("1 个会话");
+    expect(notes[0]).toContain("1 条消息");
+    expect(notes[0]).toContain("11");
+    expect(notes[0]).toContain("5 token");
+  });
 });
