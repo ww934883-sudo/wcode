@@ -4,6 +4,7 @@ import type { TodoItem } from "@wcode/core";
 import { rawModeSupported } from "../lib/tty";
 import { MarkdownText } from "./message";
 import { ToolRunning } from "./tool-line";
+import { Spinner } from "./spinner";
 import { TodoList } from "./todo-list";
 import { theme } from "../theme";
 
@@ -71,7 +72,7 @@ export function InputBox(props: InputBoxProps): React.ReactElement {
         {props.streamingText ? <MarkdownText text={props.streamingText} /> : null}
         {props.activeTool ? <ToolRunning name={props.activeTool} /> : null}
         {!props.streamingText && !props.activeTool ? (
-          <Text dimColor>思考中…</Text>
+          <Spinner label="思考中" />
         ) : null}
         {props.todos.length > 0 ? <TodoList todos={props.todos} title="任务清单:" /> : null}
       </Box>

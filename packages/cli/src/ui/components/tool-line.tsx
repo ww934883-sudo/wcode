@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { theme } from "../theme";
+import { Spinner } from "./spinner";
 
 /** 工具调用行：⏺ 名称 + 结果摘要（完成态，进 Static 历史） */
 export function ToolLine({
@@ -27,11 +28,11 @@ export function ToolLine({
   );
 }
 
-/** 运行中的工具行（动态区） */
+/** 运行中的工具行（动态区）：旋转圆圈 + 工具名 */
 export function ToolRunning({ name }: { name: string }): React.ReactElement {
   return (
     <Box>
-      <Text color={theme.accent}>⏺ {name}…</Text>
+      <Spinner label={name} color={theme.accent} />
     </Box>
   );
 }
