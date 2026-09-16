@@ -138,6 +138,19 @@ function skillCatalog(skills: SkillDefinition[]): string {
     .join("\n");
 }
 
+/**
+ * /model 展示与序号共用的模型清单（火山等端点会返回全量模型，
+ * 其中 embedding/语音/视频类确定不能当编码模型）：剔除后去重、按名称排序。
+ * 过滤只影响列表展示与序号选择；/model <名称> 手输不受限。
+ */
+export function displayModels(models: string[]): string[] {
+  const NON_CHAT =
+    /(embedding|rerank|moderation|pretrain|seaweed|seedance|seedream|tts|asr|voice|whisper|speech)/i;
+  return [...new Set(models.filter((m) => !NON_CHAT.test(m)))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+}
+
 interface McpServerStatus {
   name: string;
   command: string;
@@ -193,12 +206,25 @@ export async function handleSlashCommand(
       if (!args) {
         const models = await deps.listModels();
         if (models && models.length > 0) {
-          const lines = models.map(
+          const display = displayModels(models);
+          if (display.length === 0) {
+            sink.note(
+              `当前模型: ${deps.config.model}（provider: ${deps.config.activeProvider}）。` +
+                `端点返回 ${models.length} 个模型但均非对话类，可直接 /model <名称> 切换。`,
+            );
+            return { kind: "handled" };
+          }
+          const lines = display.map(
             (m, i) => `${i + 1}. ${m}${m === deps.config.model ? "  ← 当前" : ""}`,
           );
+          const omitted =
+            display.length < models.length
+              ? `\n\n（已隐藏 ${models.length - display.length} 个非对话类模型，如 embedding/语音；/model <名称> 可切换任意模型）`
+              : "";
           sink.assistant(
             `当前模型: ${deps.config.model}（provider: ${deps.config.activeProvider}）\n\n` +
-              `可用模型（/model <序号> 或 /model <名称> 切换）：\n${lines.join("\n")}`,
+              `可用模型（/model <序号> 或 /model <名称> 切换）：\n${lines.join("\n")}` +
+              omitted,
           );
         } else {
           sink.note(
@@ -208,15 +234,15 @@ export async function handleSlashCommand(
         }
         return { kind: "handled" };
       }
-      // 解析目标：纯数字按列表序号取，其余按模型名直切
+      // 解析目标：纯数字按列表序号取（与展示同一份过滤排序清单），其余按模型名直切
       let target = args.trim();
       if (/^\d+$/.test(target)) {
         const models = await deps.listModels();
-        const picked = models?.[Number.parseInt(target, 10) - 1];
+        const picked = models ? displayModels(models)[Number.parseInt(target, 10) - 1] : undefined;
         if (!picked) {
           sink.error(
             models && models.length > 0
-              ? `序号超出范围 1-${models.length}。直接输入 /model 查看列表。`
+              ? `序号超出范围。直接输入 /model 查看列表。`
               : "当前无法获取模型列表，请直接使用 /model <名称> 切换。",
           );
           return { kind: "handled" };

@@ -15,6 +15,10 @@ export interface DaemonOptions {
   homeDir?: string;
   /** 测试注入派发器 */
   runner?: AutomationRunner;
+  /** 注入存储（测试）；缺省打开 ~/.wcode/wcode.db，注入时由调用方管理 close */
+  store?: AutomationStore;
+  /** 测试注入信号源（默认 process） */
+  signalSource?: { once(event: string, listener: () => void): unknown };
   write?: (line: string) => void;
 }
 
@@ -60,14 +64,15 @@ export async function daemonTick(
 export async function runDaemon(opts: DaemonOptions = {}): Promise<void> {
   const write = opts.write ?? ((l: string) => console.log(l));
   const runner = opts.runner ?? createDefaultRunner({ write });
-  const store = await AutomationStore.open({ homeDir: opts.homeDir });
+  const store = opts.store ?? (await AutomationStore.open({ homeDir: opts.homeDir }));
+  const ownsStore = !opts.store; // 注入的 store 由调用方管理生命周期
 
   if (opts.once) {
     try {
       const ran = await daemonTick(store, runner, write);
       write(`[daemon] --tick 本轮执行 ${ran} 个任务`);
     } finally {
-      store.close();
+      if (ownsStore) store.close();
     }
     return;
   }
@@ -83,12 +88,18 @@ export async function runDaemon(opts: DaemonOptions = {}): Promise<void> {
   };
   await tickLoop();
   const timer = setInterval(tickLoop, tickMs);
-  const shutdown = () => {
-    clearInterval(timer);
-    store.close();
-    write("[daemon] 已退出");
-    process.exit(0);
-  };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
+
+  // 常驻：用挂起的 Promise 阻住本函数，直到收到 SIGINT/SIGTERM。
+  // 修复：此前注册完监听器后函数直接返回，bin.tsx 的 process.exit 导致 daemon 立即退出。
+  const signals = opts.signalSource ?? process;
+  await new Promise<void>((resolve) => {
+    const shutdown = () => {
+      clearInterval(timer);
+      if (ownsStore) store.close();
+      write("[daemon] 已退出");
+      resolve();
+    };
+    signals.once("SIGINT", shutdown);
+    signals.once("SIGTERM", shutdown);
+  });
 }

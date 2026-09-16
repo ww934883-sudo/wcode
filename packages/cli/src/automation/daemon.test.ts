@@ -184,3 +184,47 @@ describe("runAutomationManually（schedule run）", () => {
     }
   });
 });
+
+describe("runDaemon（常驻模式）", () => {
+  it("保持挂起直到收到信号，不提前 resolve", async () => {
+    const { store, home } = await makeStore();
+    const lines: string[] = [];
+    const listeners: Record<string, () => void> = {};
+    const fakeSignals = {
+      once(event: string, listener: () => void) {
+        listeners[event] = listener;
+        return this;
+      },
+    };
+
+    let settled = false;
+    const p = runDaemon({
+      store,
+      tickMs: 10_000,
+      runner: okRunner,
+      signalSource: fakeSignals,
+      write: (l) => lines.push(l),
+    }).then(
+      () => {
+        settled = true;
+      },
+      (e) => {
+        settled = true;
+        throw e;
+      },
+    );
+
+    // 500ms 内 resolve 即为 bug：常驻模式未挂起、函数提前返回（旧实现）
+    await new Promise((r) => setTimeout(r, 500));
+    expect(settled).toBe(false);
+    expect(lines.some((l) => l.includes("已启动"))).toBe(true);
+
+    // 发 SIGINT → 清理资源并正常 resolve（而非 process.exit）
+    listeners["SIGINT"]!();
+    await p;
+    expect(settled).toBe(true);
+    expect(lines[lines.length - 1]).toBe("[daemon] 已退出");
+    store.close();
+    await rm(home, { recursive: true, force: true }).catch(() => {});
+  });
+});

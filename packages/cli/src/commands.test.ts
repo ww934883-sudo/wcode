@@ -117,8 +117,8 @@ describe("handleSlashCommand", () => {
     const { sink, notes, assistant } = makeSink();
     await handleSlashCommand("/model", deps, sink);
     expect(assistant[0]).toContain("当前模型: claude-sonnet-4-5");
-    expect(assistant[0]).toContain("1. glm-5.3-flash");
-    expect(assistant[0]).toContain("3. deepseek-chat");
+    expect(assistant[0]).toContain("1. deepseek-chat"); // 展示按名称排序
+    expect(assistant[0]).toContain("3. glm-5.3-flash");
 
     await handleSlashCommand("/model glm-4.5-air", deps, sink);
     expect(notes[0]).toContain("glm-4.5-air");
@@ -137,7 +137,29 @@ describe("handleSlashCommand", () => {
     expect(deps.config.model).toBe("m-b");
 
     await handleSlashCommand("/model 99", deps, sink);
-    expect(errors[0]).toContain("序号超出范围 1-2");
+    expect(errors[0]).toContain("序号超出范围");
+  });
+
+  it("/model 列表过滤非对话模型并排序，序号与展示一致", async () => {
+    const { deps } = await makeDeps([], {
+      models: [
+        "doubao-seaweed-241128", // 视频生成 → 隐藏
+        "doubao-embedding-text-240515", // embedding → 隐藏
+        "zeta-36b",
+        "alpha-9b",
+      ],
+    });
+    const { sink, assistant, notes } = makeSink();
+    await handleSlashCommand("/model", deps, sink);
+    expect(assistant[0]).toContain("1. alpha-9b");
+    expect(assistant[0]).toContain("2. zeta-36b");
+    expect(assistant[0]).not.toContain("seaweed");
+    expect(assistant[0]).not.toContain("doubao-embedding-text-240515");
+    expect(assistant[0]).toContain("已隐藏 2 个非对话类模型");
+
+    // /model <序号> 按展示后的清单取，不与原始返回错位
+    await handleSlashCommand("/model 2", deps, sink);
+    expect(notes[0]).toContain("已切换模型: zeta-36b");
   });
 
   it("/model provider 不支持列表时降级为手输", async () => {

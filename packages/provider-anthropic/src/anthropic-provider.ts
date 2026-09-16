@@ -175,24 +175,58 @@ export class AnthropicProvider implements ModelProvider {
   }
 
   /** GET /v1/models（官方分页上限内单页取全）；网关不支持时抛 ProviderError */
+  /**
+   * 模型列表（/model 命令）。逐级 fallback（实测火山 coding 端点）：
+   * 1. {base}/v1/models（Anthropic 标准，x-api-key）——官方与兼容网关；
+   * 2. {base}/v3/models（Bearer）——火山 codingPlan 的 OpenAI 兼容列表（/api/coding/v3），
+   *    其 Anthropic 侧 /v1/models 返回 401，同 key 在 OpenAI 侧可拿全量列表；
+   * 3. {base}/models（Bearer）——one-api 类网关把 base 设为 …/v1 的形态。
+   * 仅在 401/403/404/405 时降级，其余错误直接抛。
+   */
   async listModels(): Promise<string[]> {
-    try {
-      const res = await this.fetchImpl(`${this.baseUrl}/v1/models?limit=1000`, {
-        headers: {
-          "x-api-key": this.apiKey,
-          "anthropic-version": this.apiVersion,
-        },
-      });
-      if (!res.ok) throw await toProviderError(res);
-      const data = (await res.json()) as { data?: Array<{ id?: string }> };
-      return (data.data ?? [])
-        .map((m) => m.id ?? "")
-        .filter((id) => id.length > 0);
-    } catch (err) {
-      if (isAbortedError(err)) throw new AbortedError();
-      if (err instanceof ProviderError) throw err;
-      throw new ProviderError(`listModels 失败: ${describe(err)}`, { retryable: true });
+    const candidates: Array<{ url: string; headers: Record<string, string> }> = [
+      {
+        url: `${this.baseUrl}/v1/models?limit=1000`,
+        headers: { "x-api-key": this.apiKey, "anthropic-version": this.apiVersion },
+      },
+      {
+        url: `${this.baseUrl}/v3/models`,
+        headers: { authorization: `Bearer ${this.apiKey}` },
+      },
+      {
+        url: `${this.baseUrl}/models`,
+        headers: { authorization: `Bearer ${this.apiKey}` },
+      },
+    ];
+    let lastError: ProviderError | undefined;
+    for (const { url, headers } of candidates) {
+      try {
+        const res = await this.fetchImpl(url, { headers });
+        if (!res.ok) {
+          if ([401, 403, 404, 405].includes(res.status)) {
+            lastError = await toProviderError(res); // 该形态不可用，降级下一个候选
+            continue;
+          }
+          throw await toProviderError(res);
+        }
+        const data = (await res.json()) as { data?: Array<{ id?: string }> };
+        const ids = (data.data ?? [])
+          .map((m) => m.id ?? "")
+          .filter((id) => id.length > 0);
+        if (ids.length > 0) return ids;
+        lastError = new ProviderError(`listModels 返回空列表: ${url}`, {
+          retryable: false,
+        });
+      } catch (err) {
+        if (isAbortedError(err)) throw new AbortedError();
+        if (err instanceof ProviderError) throw err; // 非降级态（网络异常/5xx 等）直接抛
+        throw new ProviderError(`listModels 失败: ${describe(err)}`, { retryable: true });
+      }
     }
+    throw (
+      lastError ??
+      new ProviderError("listModels 失败: 所有候选端点都不可用", { retryable: false })
+    );
   }
 
   async countTokens(messages: Message[]): Promise<number> {

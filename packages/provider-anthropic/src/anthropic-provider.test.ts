@@ -146,6 +146,44 @@ describe("AnthropicProvider 契约", () => {
         status: 401,
       });
     });
+
+    it("Anthropic /v1/models 401 → 降级 Bearer /v3/models（火山 coding 实测形态）", async () => {
+      const calls: Array<{ url: string; auth?: string; apiKey?: string }> = [];
+      const provider = new AnthropicProvider({
+        apiKey: "k",
+        model: "m",
+        baseUrl: "https://ark.example.com/api/coding",
+        fetchImpl: (async (url: string, init?: RequestInit) => {
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          calls.push({
+            url,
+            auth: headers.authorization,
+            apiKey: headers["x-api-key"],
+          });
+          if (url.includes("/v1/models")) {
+            return new Response(JSON.stringify({ error: { message: "unauthorized" } }), {
+              status: 401,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({
+              data: [{ id: "glm-5.3-flash" }, { id: "doubao-seed-x" }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }) as unknown as typeof fetch,
+      });
+      await expect(provider.listModels()).resolves.toEqual([
+        "glm-5.3-flash",
+        "doubao-seed-x",
+      ]);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.url).toContain("/v1/models");
+      expect(calls[0]?.apiKey).toBe("k");
+      expect(calls[1]?.url).toContain("/v3/models");
+      expect(calls[1]?.auth).toBe("Bearer k");
+    });
   });
 
   describe("toAnthropicMessages", () => {
