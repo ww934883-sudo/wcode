@@ -30,6 +30,7 @@ export * from "./session/store";
 export * from "./session/resume";
 export * from "./session/sqlite-store";
 export * from "./session/driver";
+export * from "./automation/store";
 export * from "./loop/agent-session";
 export * from "./prompt/sections";
 export * from "./prompt/agents-md";

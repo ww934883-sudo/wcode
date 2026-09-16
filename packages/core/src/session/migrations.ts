@@ -45,6 +45,54 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ].join(";\n"),
   },
+  {
+    // 自动化调度（W-c，参考 ZCode tasks-index 的 automations/automation_runs）：
+    // 调度状态机列（running/claimed_at/dispatch_attempts/retry_at）支持 daemon 认领互斥与失败退避
+    id: "0002-automations",
+    up: [
+      `CREATE TABLE automations (
+        id               TEXT PRIMARY KEY,
+        title            TEXT NOT NULL,
+        prompt           TEXT NOT NULL,
+        cwd              TEXT NOT NULL,
+        project_hash     TEXT NOT NULL,
+        provider         TEXT,
+        model            TEXT,
+        mode             TEXT NOT NULL DEFAULT 'default',
+        schedule_kind    TEXT NOT NULL,
+        cron_expr        TEXT,
+        run_at           INTEGER,
+        timeout_ms       INTEGER,
+        max_runs         INTEGER,
+        run_count        INTEGER NOT NULL DEFAULT 0,
+        enabled          INTEGER NOT NULL DEFAULT 1,
+        next_run_at      INTEGER,
+        last_run_at      INTEGER,
+        running          INTEGER NOT NULL DEFAULT 0,
+        claimed_at       INTEGER,
+        dispatch_attempts INTEGER NOT NULL DEFAULT 0,
+        retry_at         INTEGER,
+        last_error       TEXT,
+        created_at       INTEGER NOT NULL,
+        updated_at       INTEGER NOT NULL
+      )`,
+      `CREATE INDEX idx_automations_due ON automations(enabled, next_run_at)`,
+      `CREATE INDEX idx_automations_retry ON automations(enabled, retry_at)`,
+      `CREATE INDEX idx_automations_project ON automations(project_hash)`,
+      `CREATE TABLE automation_runs (
+        id            TEXT PRIMARY KEY,
+        automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+        trigger       TEXT NOT NULL,
+        started_at    INTEGER NOT NULL,
+        finished_at   INTEGER,
+        outcome       TEXT,
+        exit_code     INTEGER,
+        session_id    TEXT,
+        error         TEXT
+      )`,
+      `CREATE INDEX idx_runs_automation ON automation_runs(automation_id, started_at DESC)`,
+    ].join(";\n"),
+  },
 ];
 
 /** 应用全部未执行的迁移；幂等（已登记的 id 跳过），返回本次新应用的迁移 id */

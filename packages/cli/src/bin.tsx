@@ -22,6 +22,8 @@ import { FakeProvider, RecordingHost, endTurn, toolUseTurn } from "@wcode/core/t
 import { bootstrap, createProvider, refreshRuntime } from "./bootstrap";
 import { handleSlashCommand, type CommandDeps, type CommandSink } from "./commands";
 import { runHeadless } from "./headless";
+import { handleScheduleCommand } from "./automation/schedule";
+import { runDaemon } from "./automation/daemon";
 import { InkHost } from "./ui/ink-host";
 import { App } from "./ui/App";
 
@@ -57,10 +59,16 @@ async function main(): Promise<number> {
     return selftest();
   }
 
-  // 权限模式可用 --mode=acceptEdits 覆盖（生产级：CLI 层是配置最高层）
-  const modeArg = args.find((a) => a.startsWith("--mode="));
-  const mode = modeArg?.split("=")[1];
-  const overrides = mode ? { permissions: { mode } } : undefined;
+  // CLI 层是配置最高层：--mode= 覆盖权限模式；--model=/--provider= 覆盖模型与
+  // provider（自动化任务派发子进程用，见 automation/runner.ts）
+  const mode = args.find((a) => a.startsWith("--mode="))?.split("=")[1];
+  const modelOverride = args.find((a) => a.startsWith("--model="))?.split("=")[1];
+  const providerOverride = args.find((a) => a.startsWith("--provider="))?.split("=")[1];
+  const overrides: Record<string, unknown> = {
+    ...(mode ? { permissions: { mode } } : {}),
+    ...(modelOverride ? { model: modelOverride } : {}),
+    ...(providerOverride ? { activeProvider: providerOverride } : {}),
+  };
   const resume = args.includes("--continue") || args.includes("-c");
   const outputFormat =
     args.find((a) => a.startsWith("--output-format="))?.split("=")[1] === "json"
@@ -89,6 +97,15 @@ async function main(): Promise<number> {
     const result = await runHeadless({ prompt, outputFormat, overrides, resume });
     if (result.stdout) process.stdout.write(result.stdout + "\n");
     return result.code;
+  }
+
+  // 自动化调度（W-c）：wcode schedule ... / wcode daemon [--tick]
+  if (args[0] === "schedule") {
+    return handleScheduleCommand(args.slice(1));
+  }
+  if (args[0] === "daemon") {
+    await runDaemon({ once: args.includes("--tick") });
+    return 0;
   }
 
   const host = new InkHost();
@@ -279,6 +296,10 @@ function printHelp(): void {
   wcode -p "任务描述"             无头模式：执行任务、输出结果、退出（自动化）
   wcode -p -                      无头模式，任务从 stdin 读取（管道场景）
   wcode -p --output-format=json   无头模式输出 JSON（status/reply/usage）
+  wcode schedule add|list|run|pause|resume|remove|log
+                                  自动化任务（cron / 一次性，见下方自动化说明）
+  wcode daemon [--tick]           常驻守护进程：到期自动执行 schedule 任务
+                                  （--tick 只跑一轮，供测试/外部 cron 驱动）
 
 选项:
   --mode=<mode>   权限模式: plan | default | acceptEdits | bypass
@@ -292,6 +313,11 @@ function printHelp(): void {
     （需要放行时用 --mode=bypass / acceptEdits 或配置 allow 规则）
   - 组合示例: echo "检查依赖过期" | wcode -p -
     定时续跑:  wcode -p -c "跟进上一会话的任务"
+
+自动化说明:
+  - wcode schedule add "任务" --cron="0 9 * * *" 创建自动化（--at="+10m" 一次性）
+  - wcode daemon 常驻后台，到期任务自动派发 wcode -p 子进程执行
+  - 无人值守权限由任务的 --mode 决定（默认 default=自动拒绝变更类操作）
 
 配置:
   ~/.wcode/settings.json          全局配置

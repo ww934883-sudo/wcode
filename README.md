@@ -140,6 +140,30 @@ wcode -p -c "跟进上一会话的任务"                 # 无头续跑最近�
   `wcode -p -c "检查未完成任务并继续推进，没有则汇报全部完成"`
 - Skills、hooks、子 Agent、AGENTS.md 在无头模式下同样生效。
 
+## 自动化调度（schedule / daemon）
+
+在 `-p` 之上内置调度器：任务持久化在 `~/.wcode/wcode.db`（automations/automation_runs 表），
+`wcode daemon` 到点自动派发 `wcode -p --output-format=json` 子进程执行。
+
+```bash
+wcode schedule add "检查未完成任务并继续推进" --cron="0 23 * * *" --mode=acceptEdits
+wcode schedule add "给 TODO 补一条周报" --at="2026-09-20T09:00"     # 一次性（也支持 --at="+10m"）
+wcode schedule list [--project=path]      # 列表（bypass 任务标 ⚠）
+wcode schedule run <id>                   # 手动立即执行一次（前台）
+wcode schedule pause|resume|remove <id>   # 停用/恢复/删除；id 可用前缀
+wcode schedule log [id]                   # 运行历史（结局/耗时/会话 id）
+wcode daemon                              # 常驻守护（每 60s 扫描到期任务）
+wcode daemon --tick                       # 只跑一轮：可直接挂 Windows 计划任务 / crontab
+```
+
+- **认领互斥**：daemon 与 `schedule run` 并发时同一条任务只被一个执行方拿走；
+  崩溃残留的运行态 2 小时后可被重新认领。
+- **失败退避**：子进程起不来等基础设施失败按 60s×2ⁿ 退避重试（封顶 1h），不计入次数；
+  正常跑完的失败（模型报错等）照常记录并推进调度。
+- **无人值守权限**：任务默认 `default` 模式=变更类操作自动拒绝，天然只读安全；
+  需要放行必须显式 `--mode=acceptEdits` / `bypass`。
+- cron 解析用 croner（本机时区）；每次运行回链产生的会话（sessionId），可在 TUI 里 `/resume`。
+
 ## Skills / Hooks / 自定义子 Agent（M2）
 
 ### 斜杠命令
