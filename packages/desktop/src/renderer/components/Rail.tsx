@@ -1,4 +1,4 @@
-/** 左侧功能栏：页面导航（会话/插件/素材库/用量/设置） */
+/** 左侧功能栏：页面导航（会话/插件/自动化/素材库/用量/设置） */
 const ICONS: { key: string; title: string; path: string }[] = [
   {
     key: "chat",
@@ -9,6 +9,11 @@ const ICONS: { key: string; title: string; path: string }[] = [
     key: "plugins",
     title: "插件（MCP / Skills）",
     path: "M12 3l2.4 4.9L20 9l-4 3.9.9 5.6L12 15.8 7.1 18.5 8 12.9 4 9l5.6-1.1L12 3z",
+  },
+  {
+    key: "automations",
+    title: "定时任务",
+    path: "M12 2a10 10 0 100 20 10 10 0 000-20zm1 5h-2v6l5 3 1-1.7-4-2.3V7z",
   },
   {
     key: "media",
@@ -27,7 +32,7 @@ const ICONS: { key: string; title: string; path: string }[] = [
   },
 ];
 
-export type View = "chat" | "plugins" | "media" | "usage" | "settings";
+export type View = "chat" | "plugins" | "automations" | "media" | "usage" | "settings";
 
 export function Rail({ view, onView }: { view: View; onView: (v: View) => void }) {
   return (

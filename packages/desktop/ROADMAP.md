@@ -37,7 +37,11 @@ CodePilot 式欢迎页（居中问候 + 引导卡）与一体化输入卡。
 
 ## M3-D+：功能补全（按价值排序）
 
-- 定时任务 UI：core automation 模块现成，只差界面（小）。
+- 定时任务 UI ✅：主进程 AutomationDesk——core AutomationStore 直连
+  （与 CLI daemon 共库 claim 互斥防双跑）+ 60s 内置 tick + 进程内 headless
+  执行（不开子进程；权限询问自动拒绝，会话 jsonl 落盘可回看）；
+  渲染层「定时任务」页：cron/一次性创建、启停、手动运行、运行记录、删除。
+  浏览器预览模式为内存 mock。
 - 检查点原地回退：现在只有分叉（中）。
 - MCP 配置管理：增删改 server，现在只读 + 启停（中）。
 - 图片生成 + 素材库：需媒体类 provider 端口（大）。

@@ -32,6 +32,8 @@ import {
 import { AnthropicProvider } from "@wcode/provider-anthropic";
 import { OpenAIChatProvider, OpenAIResponsesProvider } from "@wcode/provider-openai";
 import type { PermissionMode, RuntimeInfo, SearchHitEntry, SessionEntry, ThinkingLevel } from "../shared/protocol";
+import type { AutomationDeps } from "./automation";
+import { AutomationDesk } from "./automation";
 import { buildDemoTurns, ScriptedProvider } from "./demo-script";
 import { prepareDemoWorkspace } from "./demo-workspace";
 import { patchUserSettings } from "./settings";
@@ -79,6 +81,7 @@ export class DesktopRuntime {
   private agents: CustomAgentDef[] = [];
   private skills: SkillDefinition[] = [];
   private readonly homeDir: string;
+  private automationDesk: AutomationDesk | null = null;
 
   constructor(
     private readonly host: {
@@ -120,6 +123,60 @@ export class DesktopRuntime {
     if (this.mode === "demo") {
       this.currentCwd = await prepareDemoWorkspace(this.opts.userDataDir);
     }
+    // 自动化调度台：主进程内置 tick，与 CLI daemon 共库（claim 互斥防双跑）
+    this.automationDesk = new AutomationDesk(this.automationDeps());
+    this.automationDesk.start();
+  }
+
+  /** 应用退出时释放：停调度器并关闭 SQLite 连接（WAL 检查点） */
+  dispose(): void {
+    this.automationDesk?.stop();
+    this.automationDesk = null;
+  }
+
+  private automationDeps(): AutomationDeps {
+    return {
+      homeDir: this.homeDir,
+      providerFor: (cwd) => this.providerFor(cwd),
+      registry: () => this.registry,
+      systemFor: (cwd) => this.systemFor(cwd),
+      permissionRules: () =>
+        this.config
+          ? { allow: [...this.config.permissions.allow], deny: [...this.config.permissions.deny] }
+          : { allow: [], deny: [] },
+      driverFor: (cwd) => this.driverFor(cwd),
+      thinking: () => this.thinkingLevel,
+      onChanged: () => this.opts.cb.onInfo(),
+    };
+  }
+
+  private desk(): AutomationDesk {
+    if (!this.automationDesk) throw new Error("自动化调度台未就绪");
+    return this.automationDesk;
+  }
+
+  listAutomations() {
+    return this.desk().list();
+  }
+
+  addAutomation(spec: Parameters<AutomationDesk["add"]>[0]) {
+    return this.desk().add(spec);
+  }
+
+  removeAutomation(id: string) {
+    return this.desk().remove(id);
+  }
+
+  setAutomationEnabled(id: string, enabled: boolean) {
+    return this.desk().setEnabled(id, enabled);
+  }
+
+  runAutomation(id: string) {
+    return this.desk().runManually(id);
+  }
+
+  listAutomationRuns(id: string) {
+    return this.desk().runs(id);
   }
 
   private activeProviderName(): string {

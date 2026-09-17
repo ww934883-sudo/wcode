@@ -1,5 +1,8 @@
 import type { AgentEvent, Message, PermissionDecision } from "@wcode/core";
 import type {
+  AutomationEntry,
+  AutomationRunEntry,
+  AutomationSpecInput,
   PermissionAsk,
   PermissionMode,
   RuntimeInfo,
@@ -38,6 +41,10 @@ export function createMockBridge(): WcodeBridge {
   let mcpConnected = true;
   let notice: string | undefined =
     "浏览器预览模式：未连接 Electron 主进程，事件由页内脚本回放";
+
+  // 浏览器预览的自动化是纯内存演示数据，不落库也不执行
+  const automations: AutomationEntry[] = [];
+  const autoRuns = new Map<string, AutomationRunEntry[]>();
 
   const seed = (id: string, title: string): void => {
     sessions.set(id, {
@@ -301,6 +308,73 @@ export function createMockBridge(): WcodeBridge {
       mcpConnected = enabled;
       bump();
     },
+    listAutomations: async () => [...automations],
+    addAutomation: async (spec: AutomationSpecInput) => {
+      if (!spec.prompt.trim()) throw new Error("请填写任务提示词");
+      if (spec.schedule.kind === "cron" && !spec.schedule.expr.trim()) {
+        throw new Error("cron 调度需要表达式");
+      }
+      const now = Date.now();
+      const id = `mock-auto-${++seq}`;
+      const rec: AutomationEntry = {
+        id,
+        title: spec.title.trim() || spec.prompt.slice(0, 30),
+        prompt: spec.prompt,
+        cwd: spec.cwd,
+        mode: spec.mode ?? "default",
+        scheduleKind: spec.schedule.kind,
+        cronExpr: spec.schedule.kind === "cron" ? spec.schedule.expr : null,
+        runAt: spec.schedule.kind === "once" ? spec.schedule.runAt : null,
+        timeoutMs: spec.timeoutMs ?? null,
+        maxRuns: spec.maxRuns ?? null,
+        runCount: 0,
+        enabled: true,
+        nextRunAt:
+          spec.schedule.kind === "cron" ? now + 3_600_000 : (spec.schedule.runAt ?? null),
+        lastRunAt: null,
+        running: false,
+        dispatchAttempts: 0,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      automations.unshift(rec);
+      bump();
+      return rec;
+    },
+    removeAutomation: async (id) => {
+      const i = automations.findIndex((a) => a.id === id);
+      if (i >= 0) automations.splice(i, 1);
+      autoRuns.delete(id);
+      bump();
+    },
+    setAutomationEnabled: async (id, enabled) => {
+      const a = automations.find((x) => x.id === id);
+      if (a) {
+        a.enabled = enabled;
+        a.updatedAt = Date.now();
+      }
+      bump();
+    },
+    runAutomation: async (id) => {
+      const a = automations.find((x) => x.id === id);
+      if (!a) return;
+      const run: AutomationRunEntry = {
+        id: `mock-run-${++seq}`,
+        automationId: a.id,
+        trigger: "manual",
+        startedAt: Date.now(),
+        finishedAt: Date.now() + 1200,
+        outcome: "success",
+        sessionId: null,
+        error: null,
+      };
+      a.runCount++;
+      a.lastRunAt = run.startedAt;
+      autoRuns.set(a.id, [run, ...(autoRuns.get(a.id) ?? [])]);
+      bump();
+    },
+    listAutomationRuns: async (id) => autoRuns.get(id) ?? [],
     onEvent: (cb) => {
       evSubs.add(cb);
       return () => evSubs.delete(cb);

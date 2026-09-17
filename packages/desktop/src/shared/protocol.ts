@@ -53,6 +53,56 @@ export interface McpEntry {
   connected: boolean;
 }
 
+/** 自动化任务条目（core AutomationRecord 的渲染层视图） */
+export interface AutomationEntry {
+  id: string;
+  title: string;
+  prompt: string;
+  cwd: string;
+  mode: string;
+  scheduleKind: "cron" | "once";
+  cronExpr: string | null;
+  runAt: number | null;
+  timeoutMs: number | null;
+  maxRuns: number | null;
+  runCount: number;
+  enabled: boolean;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  running: boolean;
+  dispatchAttempts: number;
+  lastError: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 一次自动化运行记录 */
+export interface AutomationRunEntry {
+  id: string;
+  automationId: string;
+  trigger: "schedule" | "manual";
+  startedAt: number;
+  finishedAt: number | null;
+  outcome: string | null;
+  sessionId: string | null;
+  error: string | null;
+}
+
+/** 新建自动化表单提交的调度规格（相对时间由渲染层换算成 epoch 毫秒） */
+export type AutomationScheduleSpec =
+  | { kind: "cron"; expr: string }
+  | { kind: "once"; runAt: number };
+
+export interface AutomationSpecInput {
+  title: string;
+  prompt: string;
+  cwd: string;
+  mode?: string;
+  schedule: AutomationScheduleSpec;
+  timeoutMs?: number;
+  maxRuns?: number;
+}
+
 export interface StatsInfo {
   sessionCount: number;
   messageCount: number;
@@ -121,6 +171,14 @@ export interface WcodeBridge {
   saveProviderKey(name: string, key: string): Promise<void>;
   setActiveProvider(name: string): Promise<void>;
   setMcpEnabled(name: string, enabled: boolean): Promise<void>;
+  /** 自动化任务（主进程内置调度器执行，与 CLI daemon 共库互斥） */
+  listAutomations(): Promise<AutomationEntry[]>;
+  addAutomation(spec: AutomationSpecInput): Promise<AutomationEntry>;
+  removeAutomation(id: string): Promise<void>;
+  setAutomationEnabled(id: string, enabled: boolean): Promise<void>;
+  /** 手动立即执行一次（后台运行，结果进运行记录） */
+  runAutomation(id: string): Promise<void>;
+  listAutomationRuns(id: string): Promise<AutomationRunEntry[]>;
   onEvent(cb: (sessionId: string, ev: AgentEvent) => void): () => void;
   onPermission(cb: (ask: PermissionAsk) => void): () => void;
   onInfo(cb: (info: RuntimeInfo) => void): () => void;

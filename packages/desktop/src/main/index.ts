@@ -89,6 +89,42 @@ function registerIpc(): void {
   ipcMain.handle("wcode:setMcpEnabled", (_e, name: unknown, enabled: unknown) =>
     rt().setMcpEnabled(String(name), Boolean(enabled)),
   );
+  ipcMain.handle("wcode:listAutomations", () => rt().listAutomations());
+  ipcMain.handle("wcode:addAutomation", (_e, spec: unknown) => {
+    const s = spec as Record<string, unknown>;
+    const schedule = (s?.schedule ?? {}) as Record<string, unknown>;
+    if (schedule.kind === "cron" && typeof schedule.expr === "string") {
+      return rt().addAutomation({
+        title: String(s.title ?? ""),
+        prompt: String(s.prompt ?? ""),
+        cwd: String(s.cwd ?? ""),
+        mode: typeof s.mode === "string" ? s.mode : undefined,
+        schedule: { kind: "cron", expr: schedule.expr },
+        timeoutMs: typeof s.timeoutMs === "number" ? s.timeoutMs : undefined,
+        maxRuns: typeof s.maxRuns === "number" ? s.maxRuns : undefined,
+      });
+    }
+    if (schedule.kind === "once" && typeof schedule.runAt === "number") {
+      return rt().addAutomation({
+        title: String(s.title ?? ""),
+        prompt: String(s.prompt ?? ""),
+        cwd: String(s.cwd ?? ""),
+        mode: typeof s.mode === "string" ? s.mode : undefined,
+        schedule: { kind: "once", runAt: schedule.runAt },
+        timeoutMs: typeof s.timeoutMs === "number" ? s.timeoutMs : undefined,
+        maxRuns: typeof s.maxRuns === "number" ? s.maxRuns : undefined,
+      });
+    }
+    throw new Error('调度规格无效：需要 { kind: "cron", expr } 或 { kind: "once", runAt }');
+  });
+  ipcMain.handle("wcode:removeAutomation", (_e, id: unknown) => rt().removeAutomation(String(id)));
+  ipcMain.handle("wcode:setAutomationEnabled", (_e, id: unknown, enabled: unknown) =>
+    rt().setAutomationEnabled(String(id), Boolean(enabled)),
+  );
+  ipcMain.handle("wcode:runAutomation", (_e, id: unknown) => rt().runAutomation(String(id)));
+  ipcMain.handle("wcode:listAutomationRuns", (_e, id: unknown) =>
+    rt().listAutomationRuns(String(id)),
+  );
 }
 
 async function createWindow(): Promise<void> {
@@ -128,6 +164,7 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   host?.dispose();
+  runtime?.dispose();
   app.quit();
 });
 

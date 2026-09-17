@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PermissionDecision } from "@wcode/core";
 import type { PermissionAsk, RuntimeInfo, SearchHitEntry } from "../shared/protocol";
 import { ChatPane, type PaneState } from "./components/ChatPane";
+import { AutomationPage } from "./components/AutomationPage";
 import { MediaPage } from "./components/MediaPage";
 import { PluginsPage } from "./components/PluginsPage";
 import { Rail, type View } from "./components/Rail";
@@ -226,6 +227,7 @@ export function App() {
             onToggleMcp={(name, enabled) => void bridge.setMcpEnabled(name, enabled)}
           />
         )}
+        {view === "automations" && <AutomationPage bridge={bridge} info={info} />}
         {view === "media" && <MediaPage />}
         {view === "usage" && <UsagePage info={info} />}
         {view === "settings" && (
