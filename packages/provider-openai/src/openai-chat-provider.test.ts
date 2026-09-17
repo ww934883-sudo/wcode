@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OpenAIChatProvider, toChatMessages } from "./openai-chat-provider";
-import type { Message, ModelRequest, ToolDef } from "@wcode/core";
+import type { Message, ModelRequest, ThinkingLevel, ToolDef } from "@wcode/core";
 
 function sseResponse(sse: string, status = 200): Response {
   return new Response(status === 200 ? sse : JSON.stringify({ error: { message: sse } }), {
@@ -230,5 +230,35 @@ describe("OpenAIChatProvider 契约", () => {
       const tool = wire[2] as { role: string; content: string };
       expect(tool.content).toContain("1 张图片");
     });
+  });
+});
+
+describe("思考级别映射（reasoning_effort）", () => {
+  const minimalSse = 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n';
+  async function capturedBody(
+    thinking: ThinkingLevel | undefined,
+  ): Promise<Record<string, unknown>> {
+    let body: Record<string, unknown> = {};
+    const provider = new OpenAIChatProvider({
+      apiKey: "k",
+      model: "m",
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return sseResponse(minimalSse);
+      }) as typeof fetch,
+    });
+    await collect(provider, { ...baseReq(), thinking });
+    return body;
+  }
+
+  it("off/缺省不携带 reasoning_effort", async () => {
+    expect(await capturedBody(undefined)).not.toHaveProperty("reasoning_effort");
+    expect(await capturedBody("off")).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("low/medium/high 原样透传", async () => {
+    expect(await capturedBody("low")).toMatchObject({ reasoning_effort: "low" });
+    expect(await capturedBody("medium")).toMatchObject({ reasoning_effort: "medium" });
+    expect(await capturedBody("high")).toMatchObject({ reasoning_effort: "high" });
   });
 });

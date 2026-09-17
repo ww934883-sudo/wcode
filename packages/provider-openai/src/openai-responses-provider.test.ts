@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OpenAIResponsesProvider, toResponsesInput } from "./openai-responses-provider";
-import type { Message, ModelRequest } from "@wcode/core";
+import type { Message, ModelRequest, ThinkingLevel } from "@wcode/core";
 
 function sseResponse(sse: string, status = 200): Response {
   return new Response(status === 200 ? sse : JSON.stringify({ error: { message: sse } }), {
@@ -177,5 +177,35 @@ describe("OpenAIResponsesProvider 契约", () => {
         output: "内容",
       });
     });
+  });
+});
+
+describe("思考级别映射（reasoning.effort）", () => {
+  const minimalSse = 'data: {"type":"response.completed","response":{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}}\n\n';
+  async function capturedBody(
+    thinking: ThinkingLevel | undefined,
+  ): Promise<Record<string, unknown>> {
+    let body: Record<string, unknown> = {};
+    const provider = new OpenAIResponsesProvider({
+      apiKey: "k",
+      model: "m",
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return sseResponse(minimalSse);
+      }) as typeof fetch,
+    });
+    await collect(provider, { ...baseReq(), thinking });
+    return body;
+  }
+
+  it("off/缺省不携带 reasoning", async () => {
+    expect(await capturedBody(undefined)).not.toHaveProperty("reasoning");
+    expect(await capturedBody("off")).not.toHaveProperty("reasoning");
+  });
+
+  it("low/medium/high 映射为 reasoning.effort", async () => {
+    expect(await capturedBody("low")).toMatchObject({ reasoning: { effort: "low" } });
+    expect(await capturedBody("medium")).toMatchObject({ reasoning: { effort: "medium" } });
+    expect(await capturedBody("high")).toMatchObject({ reasoning: { effort: "high" } });
   });
 });

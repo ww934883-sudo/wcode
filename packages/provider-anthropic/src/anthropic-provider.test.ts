@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AnthropicProvider, toAnthropicMessages } from "./anthropic-provider";
-import type { Message, ModelRequest } from "@wcode/core";
+import type { Message, ModelRequest, ThinkingLevel } from "@wcode/core";
 
 function sseResponse(sse: string, status = 200): Response {
   return new Response(status === 200 ? sse : JSON.stringify({ error: { message: sse } }), {
@@ -234,5 +234,43 @@ describe("AnthropicProvider 契约", () => {
         data: "aGk=",
       });
     });
+  });
+});
+
+describe("思考级别映射", () => {
+  const minimalSse = 'data: {"type":"message_stop"}\n\n';
+  async function capturedBody(
+    thinking: ThinkingLevel | undefined,
+  ): Promise<Record<string, unknown>> {
+    let body: Record<string, unknown> = {};
+    const provider = new AnthropicProvider({
+      apiKey: "k",
+      model: "m",
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return sseResponse(minimalSse);
+      }) as typeof fetch,
+    });
+    for await (const _ev of provider.stream({ ...baseReq(), thinking })) {
+      /* 消费即触发请求 */
+    }
+    return body;
+  }
+
+  it("off/缺省不携带 thinking 字段", async () => {
+    expect(await capturedBody(undefined)).not.toHaveProperty("thinking");
+    expect(await capturedBody("off")).not.toHaveProperty("thinking");
+  });
+
+  it("low/medium/high 映射为递增预算，max_tokens 自动抬到预算之上", async () => {
+    const low = await capturedBody("low");
+    expect(low.thinking).toEqual({ type: "enabled", budget_tokens: 4096 });
+    expect(low.max_tokens).toBe(5120); // 4096 + 1024
+    const medium = await capturedBody("medium");
+    expect(medium.thinking).toEqual({ type: "enabled", budget_tokens: 16384 });
+    expect(medium.max_tokens).toBe(17408);
+    const high = await capturedBody("high");
+    expect(high.thinking).toEqual({ type: "enabled", budget_tokens: 32768 });
+    expect(high.max_tokens).toBe(33792);
   });
 });

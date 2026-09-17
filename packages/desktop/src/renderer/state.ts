@@ -83,6 +83,51 @@ export interface UiState {
 
 export const emptyUiState: UiState = { items: [], usage: null, running: false };
 
+export interface ErrorInfo {
+  kind: "transient" | "auth" | "rate" | "network" | "generic";
+  /** 可行动提示（transient/generic 无需额外文案） */
+  hint: string;
+  /** 展示「重试」按钮（重发最后一条用户输入） */
+  retryable: boolean;
+  /** 展示「打开设置」按钮 */
+  openSettings: boolean;
+}
+
+/**
+ * 错误文案 → 用户可行动的分类。core 重试倒计时（"N s 后重试"）算 transient，
+ * 渲染为普通提示行，不弹操作按钮。
+ */
+export function classifyError(message: string): ErrorInfo {
+  if (/后重试（第 \d+ 次）/.test(message)) {
+    return { kind: "transient", hint: "", retryable: false, openSettings: false };
+  }
+  if (/\b(401|403)\b/.test(message)) {
+    return {
+      kind: "auth",
+      hint: "API key 无效、过期或无权限。请到设置页检查该服务商的 key。",
+      retryable: false,
+      openSettings: true,
+    };
+  }
+  if (/\b429\b/.test(message) || /限流|rate.?limit|quota/i.test(message)) {
+    return {
+      kind: "rate",
+      hint: "服务商限流或额度不足：已自动重试仍失败，请稍后再试，或检查套餐余额。",
+      retryable: true,
+      openSettings: false,
+    };
+  }
+  if (/网络错误|流中断|fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|timed?out|证书|SSL|TLS/i.test(message)) {
+    return {
+      kind: "network",
+      hint: "无法连接服务商：请检查本机网络或代理后重试。",
+      retryable: true,
+      openSettings: false,
+    };
+  }
+  return { kind: "generic", hint: "", retryable: true, openSettings: false };
+}
+
 /**
  * AgentEvent → UI 状态。数组一律不可变替换（原地 push 不会被 React 感知，
  * 与 TUI <Static> 的 history 纪律同理）。

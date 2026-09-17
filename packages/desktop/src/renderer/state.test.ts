@@ -3,6 +3,7 @@ import type { Message } from "@wcode/core";
 import {
   addUserItem,
   applyEvent,
+  classifyError,
   emptyUiState,
   itemsFromMessages,
   summarizeInput,
@@ -97,5 +98,44 @@ describe("桌面渲染层事件归约", () => {
     ];
     const items = itemsFromMessages(messages);
     expect(items[0]).toMatchObject({ kind: "tool", status: "error", summary: "boom" });
+  });
+});
+
+describe("错误分类", () => {
+  it("core 重试倒计时是 transient，不弹操作按钮", () => {
+    const info = classifyError("模型请求失败（429: limit）,3s 后重试（第 1 次）");
+    expect(info.kind).toBe("transient");
+    expect(info.retryable).toBe(false);
+    expect(info.openSettings).toBe(false);
+  });
+
+  it("401/403 → 引导打开设置，不给重试", () => {
+    for (const msg of ["Anthropic API 401: invalid x-api-key", "Anthropic API 403: 权限不足"]) {
+      const info = classifyError(msg);
+      expect(info.kind).toBe("auth");
+      expect(info.openSettings).toBe(true);
+      expect(info.retryable).toBe(false);
+    }
+  });
+
+  it("429/限流 → 可重试", () => {
+    const info = classifyError("OpenAI Chat API 429: Too Many Requests");
+    expect(info.kind).toBe("rate");
+    expect(info.retryable).toBe(true);
+    expect(info.openSettings).toBe(false);
+  });
+
+  it("网络类错误 → 可重试", () => {
+    for (const msg of ["网络错误: fetch failed", "流中断: ECONNRESET", "OpenAI API ETIMEDOUT"]) {
+      const info = classifyError(msg);
+      expect(info.kind).toBe("network");
+      expect(info.retryable).toBe(true);
+    }
+  });
+
+  it("未知错误 → generic 可重试", () => {
+    const info = classifyError("ProviderError: 模型流意外结束");
+    expect(info.kind).toBe("generic");
+    expect(info.retryable).toBe(true);
   });
 });

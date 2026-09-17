@@ -4,6 +4,7 @@ import type {
   ModelRequest,
   ModelResponse,
   StreamEvent,
+  ThinkingLevel,
   ToolCall,
   ToolDef,
 } from "@wcode/core";
@@ -21,6 +22,17 @@ export interface OpenAIChatProviderOptions {
 }
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+
+/**
+ * 思考级别 → Chat Completions 的 reasoning_effort（o 系/gpt-5 及兼容网关）。
+ * off/undefined 不传该字段——部分兼容网关对未知枚举直接 400，
+ * 不做「都发出去」的乐观透传。
+ */
+export function reasoningEffort(
+  level: ThinkingLevel | undefined,
+): "low" | "medium" | "high" | undefined {
+  return level && level !== "off" ? level : undefined;
+}
 
 /**
  * OpenAI Chat Completions 协议适配（/chat/completions）。
@@ -53,6 +65,8 @@ export class OpenAIChatProvider implements ModelProvider {
       // 让服务端在流末尾单独发 usage 块（部分网关缺省不发）
       stream_options: { include_usage: true },
     };
+    const effort = reasoningEffort(req.thinking);
+    if (effort) body.reasoning_effort = effort;
     if (req.tools.length > 0) {
       body.tools = toChatTools(req.tools);
     }

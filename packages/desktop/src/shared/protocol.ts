@@ -1,9 +1,9 @@
-import type { AgentEvent, Message, PermissionDecision } from "@wcode/core";
+import type { AgentEvent, Message, PermissionDecision, ThinkingLevel } from "@wcode/core";
+
+// 思考级别类型以 core 的 ModelRequest.thinking 为准（provider 映射的单一事实源）
+export type { ThinkingLevel };
 
 export type PermissionMode = "plan" | "default" | "acceptEdits" | "bypass";
-
-/** 思考级别（推理力度）：provider 接入思考预算后生效，当前为运行时偏好 */
-export type ThinkingLevel = "off" | "low" | "medium" | "high";
 
 export interface SessionEntry {
   id: string;

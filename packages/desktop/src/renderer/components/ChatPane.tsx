@@ -31,6 +31,7 @@ export function ChatPane({
   model,
   permissionMode,
   thinkingLevel,
+  active,
   onActivate,
   onSend,
   onAbort,
@@ -48,6 +49,8 @@ export function ChatPane({
   model: string;
   permissionMode: PermissionMode;
   thinkingLevel: ThinkingLevel;
+  /** 分屏时的激活面板（单面板恒 false） */
+  active: boolean;
   onActivate: () => void;
   onSend: (text: string) => void;
   onAbort: () => void;
@@ -107,7 +110,7 @@ export function ChatPane({
             <select
               className="sel"
               value={thinkingLevel}
-              title="思考级别（provider 接入思考预算后生效）"
+              title="思考级别（下一轮请求生效）"
               onChange={(e) => onThinkingLevel(e.target.value as ThinkingLevel)}
             >
               {THINKING_OPTIONS.map((o) => (
@@ -130,7 +133,7 @@ export function ChatPane({
   // 空状态：CodePilot 式欢迎页（居中问候 + 输入卡 + 引导卡）
   if (pane.ui.items.length === 0) {
     return (
-      <section className="pane" onClick={onActivate}>
+      <section className={"pane" + (active ? " active" : "")} onClick={onActivate}>
         {curAsk && (
           <div className="pane-ask-hint">有待处理的权限确认：{curAsk.toolName}</div>
         )}
@@ -160,7 +163,7 @@ export function ChatPane({
   }
 
   return (
-    <section className="pane" onClick={onActivate}>
+    <section className={"pane" + (active ? " active" : "")} onClick={onActivate}>
       {curAsk && (
         <div className="pane-ask-hint">有待处理的权限确认：{curAsk.toolName}</div>
       )}
@@ -169,6 +172,8 @@ export function ChatPane({
         onDecide={onDecide}
         onSuggest={onSend}
         onFork={onFork}
+        onRetry={onSend}
+        onOpenSettings={onOpenSettings}
       />
       {composer}
     </section>

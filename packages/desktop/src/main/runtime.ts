@@ -233,6 +233,7 @@ export class DesktopRuntime {
       cwd,
       store,
       maxContextTokens: this.contextTokens,
+      thinking: this.thinkingLevel,
       initialMessages,
     });
     this.sessions.set(sessionId, {
@@ -378,7 +379,7 @@ export class DesktopRuntime {
     this.opts.cb.onInfo();
   }
 
-  /** 以下三项对新会话生效（会话创建时装配） */
+  /** 以下两项对新会话生效（会话创建时装配） */
   setContextTokens(tokens: number): void {
     this.contextTokens = tokens;
     this.opts.cb.onInfo();
@@ -389,8 +390,12 @@ export class DesktopRuntime {
     this.opts.cb.onInfo();
   }
 
+  /** 思考级别即时生效：下一轮请求就带新预算（AgentSession 内是纯请求字段，运行中也安全） */
   setThinkingLevel(level: ThinkingLevel): void {
     this.thinkingLevel = level;
+    for (const desk of this.sessions.values()) {
+      desk.session.setThinkingLevel(level);
+    }
     this.opts.cb.onInfo();
   }
 

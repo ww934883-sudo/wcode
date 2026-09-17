@@ -4,12 +4,14 @@ import type {
   ModelRequest,
   ModelResponse,
   StreamEvent,
+  ThinkingLevel,
   ToolCall,
   ToolDef,
   Usage,
 } from "@wcode/core";
 import { AbortedError, isAbortedError, ProviderError } from "@wcode/core";
 import { describe, iterateSseData, toOpenAIProviderError } from "./sse";
+import { reasoningEffort } from "./openai-chat-provider";
 
 export interface OpenAIResponsesProviderOptions {
   apiKey: string;
@@ -74,6 +76,9 @@ export class OpenAIResponsesProvider implements ModelProvider {
       max_output_tokens: Math.min(req.maxTokens, this.maxTokens),
       stream: true,
     };
+    // Responses 协议的思考参数是 reasoning:{effort}（与 Chat 的 reasoning_effort 同源映射）
+    const effort = reasoningEffort(req.thinking);
+    if (effort) body.reasoning = { effort };
     if (req.tools.length > 0) {
       body.tools = toResponsesTools(req.tools);
     }

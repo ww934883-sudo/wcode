@@ -4,6 +4,7 @@ import type {
   ModelRequest,
   ModelResponse,
   StreamEvent,
+  ThinkingLevel,
   ToolCall,
   ToolDef,
 } from "@wcode/core";
@@ -21,6 +22,27 @@ export interface AnthropicProviderOptions {
 
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
 const DEFAULT_API_VERSION = "2023-06-01";
+
+/**
+ * 思考级别 → 扩展思考预算（budget_tokens，须 ≥1024 且 < max_tokens）。
+ * off/undefined 不传思考参数。开启后 max_tokens 自动抬到预算之上，
+ * 否则官方 API 与火山兼容层都会报 max_tokens ≤ budget 校验错。
+ *
+ * 已知约束：官方 Anthropic 在「思考 + 工具循环」时要求回传上一轮 thinking 块，
+ * 而归一化 Message 不携带思维链（port 约定在 provider 层丢弃）。火山
+ * anthropic 兼容端点不强制回传，可直接用；接官方端点跑工具任务时如遇
+ * 400 提示缺 thinking 块，应关闭思考级别而不是在本层缓存回放。
+ */
+const THINKING_BUDGET: Record<Exclude<ThinkingLevel, "off">, number> = {
+  low: 4096,
+  medium: 16384,
+  high: 32768,
+};
+
+export function thinkingBudget(level: ThinkingLevel | undefined): number | undefined {
+  if (!level || level === "off") return undefined;
+  return THINKING_BUDGET[level];
+}
 
 /**
  * Anthropic Messages 协议适配（架构文档 §2.2 / §14）：
@@ -47,11 +69,16 @@ export class AnthropicProvider implements ModelProvider {
   }
 
   async *stream(req: ModelRequest): AsyncIterable<StreamEvent> {
+    const budget = thinkingBudget(req.thinking);
+    const baseMax = Math.min(req.maxTokens, this.maxTokens);
     const body = {
       model: this.model,
-      max_tokens: Math.min(req.maxTokens, this.maxTokens),
+      max_tokens: budget !== undefined ? Math.max(baseMax, budget + 1024) : baseMax,
       system: req.system,
       messages: toAnthropicMessages(req.messages),
+      ...(budget !== undefined
+        ? { thinking: { type: "enabled", budget_tokens: budget } }
+        : {}),
       ...(req.tools.length > 0 ? { tools: toAnthropicTools(req.tools) } : {}),
       stream: true,
     };

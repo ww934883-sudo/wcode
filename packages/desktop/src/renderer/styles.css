@@ -1467,3 +1467,72 @@ button {
     font-size: 20px;
   }
 }
+
+/* ---- v2.7 错误卡：分类提示 + 重试/设置入口 ---- */
+.error-card {
+  margin: 6px 0 10px 44px;
+  max-width: 560px;
+  border: 1px solid #f3c1c1;
+  background: #fdf3f2;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.error-card .error-text {
+  font-size: 12.5px;
+  color: #a3382e;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.error-card .error-hint {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.error-card .error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* ---- v2.8 分屏入口回归：侧栏顶部开关 + 激活面板描边 ---- */
+.sidebar-top {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sidebar-top .new-chat {
+  flex: 1;
+}
+
+.ghost-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 0 12px;
+  font-size: 15px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.ghost-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ghost-btn.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(91, 77, 240, 0.08);
+}
+
+.panes.split .pane.active {
+  border-color: var(--accent);
+}

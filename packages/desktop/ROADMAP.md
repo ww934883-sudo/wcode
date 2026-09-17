@@ -10,15 +10,22 @@
 权限模式、助理选择、插件页（MCP 启停 + Skills）、用量页、设置页、
 CodePilot 式欢迎页（居中问候 + 引导卡）与一体化输入卡。
 
-## M2-D3：真实模式补质量（下一冲刺）
+## M2-D3 ✅：真实模式补质量（已完成）
 
-1. **真实端到端冒烟**：用已配置的 volcengine key 真跑对话 + 工具调用，
-   验证流式/权限/持久化在真实 provider 下的表现（目前只验证过装配）。
-2. **思考级别接线**：core `ModelRequest` 加可选 thinking 字段（向后兼容）；
-   provider-anthropic → thinking budget，openai 系 → reasoning_effort；
-   volcengine 端点优先接。
-3. **错误体验**：401/429/网络错误给可行动提示（跳设置页 / 重试按钮）。
-4. **分屏入口回归**：侧栏顶部或 Ctrl+\ 快捷键（功能代码在，入口已按需求移除）。
+1. **真实端到端冒烟 ✅**：volcengine key（doubao-seed-code-preview）真跑通过——
+   流式回复、thinking=medium/high 预算均被火山 anthropic 兼容端点接受、
+   write 权限卡→允许→真实落盘→模型自读回验、jsonl 落盘（与 CLI 共享）、
+   重启后 12 条历史全量重放、分屏开关、listModels 三段降级（v1 401 → v3 bearer）。
+2. **思考级别接线 ✅**：core `ModelRequest.thinking?`（缺省不传，向后兼容）；
+   `AgentSession.setThinkingLevel` 运行期生效（子 Agent 继承，摘要请求不带）；
+   anthropic → `thinking{budget_tokens}` low/medium/high = 4k/16k/32k，
+   max_tokens 自动抬到预算之上；openai-chat → `reasoning_effort`，
+   openai-responses → `reasoning.effort`；desktop 选择器即时生效。
+   已知约束：官方 Anthropic 在思考+工具循环时要求回传 thinking 块，
+   归一化消息不携带——接官方端点跑工具任务遇 400 时应关思考级别。
+3. **错误体验 ✅**：渲染层 `classifyError` 分类——401/403 → 错误卡「打开设置」；
+   429/网络 → 「重试」（重发最后一条用户输入）；core 重试倒计时渲染为普通提示。
+4. **分屏入口回归 ✅**：侧栏顶部 ⫿ 按钮（高亮态）+ Ctrl+\ 快捷键，激活面板描边。
 
 ## M3-D：产品化基座（定位确认后）
 

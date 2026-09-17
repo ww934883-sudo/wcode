@@ -2,7 +2,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useEffect, useRef } from "react";
 import type { PermissionDecision } from "@wcode/core";
-import { summarizeInput, type ChatItem, type UiState } from "../state";
+import { classifyError, summarizeInput, type ChatItem, type UiState } from "../state";
 
 function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(marked.parse(text, { async: false }) as string);
@@ -15,11 +15,15 @@ export function ChatView({
   onDecide,
   onSuggest,
   onFork,
+  onRetry,
+  onOpenSettings,
 }: {
   ui: UiState;
   onDecide: (id: string, decision: PermissionDecision) => void;
   onSuggest: (text: string) => void;
   onFork: (userTurn: number) => void;
+  onRetry: (text: string) => void;
+  onOpenSettings: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -47,11 +51,15 @@ export function ChatView({
   }
 
   let userTurn = -1;
+  let lastUserText = "";
   return (
     <div className="chat">
       <div className="thread">
         {ui.items.map((item) => {
-          if (item.kind === "user") userTurn++;
+          if (item.kind === "user") {
+            userTurn++;
+            lastUserText = item.text;
+          }
           switch (item.kind) {
             case "user":
               return (
@@ -81,8 +89,17 @@ export function ChatView({
             case "permission":
               return <PermCard key={item.id} item={item} onDecide={onDecide} />;
             case "notice":
-              return (
-                <div key={item.id} className={`notice ${item.level}`}>
+              return item.level === "error" ? (
+                <ErrorCard
+                  key={item.id}
+                  text={item.text}
+                  canRetry={!ui.running && lastUserText !== ""}
+                  lastUserText={lastUserText}
+                  onRetry={onRetry}
+                  onOpenSettings={onOpenSettings}
+                />
+              ) : (
+                <div key={item.id} className="notice info">
                   {item.text}
                 </div>
               );
@@ -90,6 +107,43 @@ export function ChatView({
         })}
         <div ref={bottomRef} />
       </div>
+    </div>
+  );
+}
+
+/** 错误卡：分类给出可行动提示（重试 / 打开设置），重试=重发最后一条用户输入 */
+function ErrorCard({
+  text,
+  canRetry,
+  lastUserText,
+  onRetry,
+  onOpenSettings,
+}: {
+  text: string;
+  canRetry: boolean;
+  lastUserText: string;
+  onRetry: (text: string) => void;
+  onOpenSettings: () => void;
+}) {
+  const info = classifyError(text);
+  return (
+    <div className="error-card">
+      <div className="error-text">{text}</div>
+      {info.hint && <div className="error-hint">{info.hint}</div>}
+      {(info.retryable || info.openSettings) && (
+        <div className="error-actions">
+          {info.retryable && canRetry && (
+            <button className="btn" onClick={() => onRetry(lastUserText)}>
+              重试
+            </button>
+          )}
+          {info.openSettings && (
+            <button className="btn primary" onClick={onOpenSettings}>
+              打开设置
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

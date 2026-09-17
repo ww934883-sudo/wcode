@@ -1,5 +1,10 @@
 import type { Message, ToolCall, ToolResultBlock } from "../types";
-import type { ModelProvider, ModelRequest, ModelResponse } from "../model/port";
+import type {
+  ModelProvider,
+  ModelRequest,
+  ModelResponse,
+  ThinkingLevel,
+} from "../model/port";
 import type { AgentHost, AgentEvent, PermissionDecision, PermissionRequest } from "../host/port";
 import { ToolRegistry, sourceOf } from "../tools/registry";
 import { ToolExecutor, type HookFn } from "../tools/pipeline";
@@ -55,6 +60,8 @@ export interface AgentSessionOptions {
   hooks?: HooksConfig;
   /** 自定义子 Agent 定义（M2）：task 工具按 subagent 名解析 */
   customAgents?: CustomAgentDef[];
+  /** 思考级别（透传给 provider；缺省不传思考参数） */
+  thinking?: ThinkingLevel;
 }
 
 export interface RunResult {
@@ -88,6 +95,7 @@ export class AgentSession {
   private readonly log: Logger;
   private hooks?: HooksConfig;
   private customAgents: CustomAgentDef[];
+  private thinking?: ThinkingLevel;
   private abortController?: AbortController;
 
   constructor(opts: AgentSessionOptions) {
@@ -106,6 +114,7 @@ export class AgentSession {
     this.store = opts.store;
     this.hooks = opts.hooks;
     this.customAgents = opts.customAgents ?? [];
+    this.thinking = opts.thinking;
     this.state = createSessionState(opts.cwd);
     if (opts.initialMessages && opts.initialMessages.length > 0) {
       this.state.messages = [...opts.initialMessages];
@@ -190,6 +199,11 @@ export class AgentSession {
     this.provider = provider;
   }
 
+  /** 运行期调整思考级别（桌面版底部选择器），下一轮请求立即生效 */
+  setThinkingLevel(level: ThinkingLevel): void {
+    this.thinking = level;
+  }
+
   /** /goal 设定任务目标：并入 effective system prompt，压缩上下文后依然有效 */
   setGoal(goal: string | undefined): void {
     const trimmed = goal?.trim();
@@ -253,6 +267,7 @@ export class AgentSession {
       messages: microCleanMessages(this.state.messages),
       tools: this.registry.toDefs(),
       maxTokens: 8192,
+      thinking: this.thinking,
       signal,
     };
 
@@ -449,6 +464,7 @@ export class AgentSession {
       bashTimeoutMs: this.bashTimeoutMs,
       // hooks 对子 Agent 同样生效（护栏不应被子任务绕过）
       hooks: this.hooks,
+      thinking: this.thinking,
     });
     const result = await childSession.run(task.prompt);
     return result.reply || "(子 Agent 无输出)";

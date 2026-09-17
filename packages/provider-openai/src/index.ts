@@ -1,5 +1,6 @@
 export {
   OpenAIChatProvider,
+  reasoningEffort,
   toChatMessages,
   type OpenAIChatProviderOptions,
 } from "./openai-chat-provider";

@@ -117,6 +117,31 @@ export function App() {
       ui: emptyUiState,
     }));
 
+  /** 分屏开关：单面板 → 追加第二面板；双面板 → 收回为第一个面板 */
+  const toggleSplit = () => {
+    if (panesRef.current.length === 1) {
+      setPanes([
+        ...panesRef.current,
+        { sessionId: null, cwd: info?.currentCwd ?? "", ui: emptyUiState },
+      ]);
+    } else {
+      setPanes(panesRef.current.slice(0, 1));
+      setActivePane(0);
+    }
+  };
+
+  // Ctrl+\（macOS ⌘+\）：分屏开关
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "\\") {
+        e.preventDefault();
+        toggleSplit();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const pickFolder = async () => {
     const dir = await bridge.pickFolder();
     if (dir) {
@@ -131,9 +156,11 @@ export function App() {
         info={info}
         activeSessionId={panes[activePane]?.sessionId ?? null}
         searchResults={searchResults}
+        split={panes.length > 1}
         onSearch={(kw) => void doSearch(kw)}
         onOpenSession={(cwd, id) => void openSession(cwd, id)}
         onNewChat={newChat}
+        onToggleSplit={toggleSplit}
         onPickFolder={() => void pickFolder()}
         onPersona={(name) => bridge.setPersona(name)}
       />
@@ -146,6 +173,7 @@ export function App() {
             model={info?.model ?? ""}
             permissionMode={info?.permissionMode ?? "default"}
             thinkingLevel={info?.thinkingLevel ?? "medium"}
+            active={panes.length > 1 && idx === activePane}
             onActivate={() => setActivePane(idx)}
             onSend={(text) => void send(idx, text)}
             onAbort={() => bridge.abort(pane.sessionId ?? "")}

@@ -62,23 +62,27 @@ function ProjectGroup({
   );
 }
 
-/** 会话侧栏：搜索（跨项目）+ 项目分组 + 助理选择 + 状态脚注 */
+/** 会话侧栏：分屏开关 + 搜索（跨项目）+ 项目分组 + 助理选择 + 状态脚注 */
 export function Sidebar({
   info,
   activeSessionId,
   searchResults,
+  split,
   onSearch,
   onOpenSession,
   onNewChat,
+  onToggleSplit,
   onPickFolder,
   onPersona,
 }: {
   info: RuntimeInfo | null;
   activeSessionId: string | null;
   searchResults: SearchHitEntry[] | null;
+  split: boolean;
   onSearch: (keyword: string) => void;
   onOpenSession: (cwd: string, sessionId: string) => void;
   onNewChat: () => void;
+  onToggleSplit: () => void;
   onPickFolder: () => void;
   onPersona: (name: string | null) => void;
 }) {
@@ -104,9 +108,18 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <button className="new-chat" onClick={onNewChat}>
-        ＋ 新会话
-      </button>
+      <div className="sidebar-top">
+        <button className="new-chat" onClick={onNewChat}>
+          ＋ 新会话
+        </button>
+        <button
+          className={"ghost-btn" + (split ? " on" : "")}
+          title={split ? "退出分屏（Ctrl+\\）" : "分屏双会话（Ctrl+\\）"}
+          onClick={onToggleSplit}
+        >
+          ⫿
+        </button>
+      </div>
       <div className="search">
         <input
           placeholder="搜索所有会话…"

@@ -393,3 +393,45 @@ describe("AgentSession W3：子 Agent", () => {
     }
   });
 });
+
+describe("思考级别透传", () => {
+  it("构造与 setThinkingLevel 都会进入 ModelRequest；缺省不带字段", async () => {
+    const t = await makeSessionDeps();
+    try {
+      const provider = new FakeProvider([
+        { response: endTurn("a") },
+        { response: endTurn("b") },
+        { response: endTurn("c") },
+      ]);
+      const session = new AgentSession({
+        provider,
+        registry: t.registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+        thinking: "medium",
+      });
+      await session.run("一");
+      expect(provider.requests[0]?.thinking).toBe("medium");
+
+      session.setThinkingLevel("high");
+      await session.run("二");
+      expect(provider.requests[1]?.thinking).toBe("high");
+
+      const plainProvider = new FakeProvider([{ response: endTurn("d") }]);
+      const plain = new AgentSession({
+        provider: plainProvider,
+        registry: t.registry,
+        host: t.host,
+        engine: new PermissionEngine(),
+        system: "sys",
+        cwd: t.dir,
+      });
+      await plain.run("三");
+      expect(plainProvider.requests[0]?.thinking).toBeUndefined();
+    } finally {
+      await t.cleanup();
+    }
+  });
+});

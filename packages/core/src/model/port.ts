@@ -1,11 +1,19 @@
 import type { Message, StopReason, ToolCall, ToolDef, Usage } from "../types";
 
+/**
+ * 思考级别（推理力度）。缺省/undefined = 不向 provider 传任何思考参数，
+ * 行为与未接线前完全一致（向后兼容）。具体预算/参数由各 provider 自行映射。
+ */
+export type ThinkingLevel = "off" | "low" | "medium" | "high";
+
 export interface ModelRequest {
   /** 已组装好的 system prompt */
   system: string;
   messages: Message[];
   tools: ToolDef[];
   maxTokens: number;
+  /** 思考级别；off 或 undefined 都不传思考参数 */
+  thinking?: ThinkingLevel;
   /** 中断贯穿：session 的 AbortController signal */
   signal: AbortSignal;
 }
