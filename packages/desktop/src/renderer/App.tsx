@@ -203,12 +203,6 @@ export function App() {
             onThinkingLevel={(l) => bridge.setThinkingLevel(l)}
             onPickFolder={() => void pickFolder()}
             onOpenSettings={() => setView("settings")}
-            onOpenAssistant={() => {
-              setNavOpen(true);
-              window.setTimeout(() => {
-                (document.querySelector(".assistant-row .sel") as HTMLElement | null)?.focus();
-              }, 260);
-            }}
           />
         ))}
       </div>

@@ -43,7 +43,6 @@ export function ChatPane({
   onThinkingLevel,
   onPickFolder,
   onOpenSettings,
-  onOpenAssistant,
 }: {
   pane: PaneState;
   models: string[];
@@ -63,7 +62,6 @@ export function ChatPane({
   onThinkingLevel: (l: ThinkingLevel) => void;
   onPickFolder: () => void;
   onOpenSettings: () => void;
-  onOpenAssistant: () => void;
 }) {
   const curAsk = pane.ui.items.find(
     (it): it is Extract<ChatItem, { kind: "permission" }> =>
@@ -147,11 +145,6 @@ export function ChatPane({
               <span className="home-card-icon">📂</span>
               <span className="home-card-title">选择文件夹</span>
               <span className="home-card-desc">打开项目文件夹，AI 帮你编码、调试和重构</span>
-            </button>
-            <button className="home-card" onClick={onOpenAssistant}>
-              <span className="home-card-icon">🤖</span>
-              <span className="home-card-title">个人助理</span>
-              <span className="home-card-desc">设置一个记住你偏好、辅助创作的 AI</span>
             </button>
             <button className="home-card" onClick={onOpenSettings}>
               <span className="home-card-icon">🔑</span>
