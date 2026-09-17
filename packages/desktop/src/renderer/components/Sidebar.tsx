@@ -62,7 +62,7 @@ function ProjectGroup({
   );
 }
 
-/** 会话侧栏：分屏开关 + 搜索（跨项目）+ 项目分组 + 助理选择 + 状态脚注 */
+/** 会话侧栏：分屏开关 + 搜索（跨项目）+ 项目分组 */
 export function Sidebar({
   info,
   activeSessionId,
@@ -73,7 +73,6 @@ export function Sidebar({
   onNewChat,
   onToggleSplit,
   onPickFolder,
-  onPersona,
 }: {
   info: RuntimeInfo | null;
   activeSessionId: string | null;
@@ -84,7 +83,6 @@ export function Sidebar({
   onNewChat: () => void;
   onToggleSplit: () => void;
   onPickFolder: () => void;
-  onPersona: (name: string | null) => void;
 }) {
   const [query, setQuery] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,28 +167,6 @@ export function Sidebar({
           )}
         </div>
       )}
-
-      <div className="sidebar-foot">
-        {(info?.agents.length ?? 0) > 0 && (
-          <label className="assistant-row">
-            助理
-            <select
-              className="sel"
-              value={info?.persona ?? ""}
-              onChange={(e) => onPersona(e.target.value === "" ? null : e.target.value)}
-              title="选择助理（新会话生效）"
-            >
-              <option value="">默认编码助理</option>
-              {info?.agents.map((a) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {info?.notice && <div className="foot-notice">{info.notice}</div>}
-      </div>
     </aside>
   );
 }

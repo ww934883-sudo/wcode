@@ -178,7 +178,6 @@ export function App() {
         onNewChat={newChat}
         onToggleSplit={toggleSplit}
         onPickFolder={() => void pickFolder()}
-        onPersona={(name) => bridge.setPersona(name)}
       />
       <div className={panes.length > 1 ? "panes split" : "panes"}>
         {panes.map((pane, idx) => (
