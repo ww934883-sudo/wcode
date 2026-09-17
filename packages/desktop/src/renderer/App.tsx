@@ -231,31 +231,34 @@ export function App() {
       />
       {view === "chat" && chatView}
       <div className="drawer-backdrop" onClick={() => setNavOpen(false)} />
-      <div className="content">
-        {view === "chat" ? (
-          <button className="menu-btn" title="会话列表" onClick={() => setNavOpen((v) => !v)}>
-            ☰
-          </button>
-        ) : null}
-        {view === "plugins" && (
-          <PluginsPage
-            info={info}
-            onToggleMcp={(name, enabled) => void bridge.setMcpEnabled(name, enabled)}
-            onAddMcp={(name, command, args, env) => bridge.addMcpServer(name, command, args, env)}
-            onRemoveMcp={(name) => bridge.removeMcpServer(name)}
-          />
-        )}
-        {view === "automations" && <AutomationPage bridge={bridge} info={info} />}
-        {view === "media" && <MediaPage />}
-        {view === "usage" && <UsagePage info={info} />}
-        {view === "settings" && (
-          <SettingsPage
-            info={info}
-            onSaveKey={(name, key) => void bridge.saveProviderKey(name, key)}
-            onSetActive={(name) => void bridge.setActiveProvider(name)}
-          />
-        )}
-      </div>
+      {view === "chat" ? (
+        // ☰ 直接作为网格子元素：桌面端 display:none 不产生第二行（content 空壳
+        // 曾把三栏压出窗口底部——网格 5 子元素自动换行成两行）
+        <button className="menu-btn" title="会话列表" onClick={() => setNavOpen((v) => !v)}>
+          ☰
+        </button>
+      ) : (
+        <div className="content">
+          {view === "plugins" && (
+            <PluginsPage
+              info={info}
+              onToggleMcp={(name, enabled) => void bridge.setMcpEnabled(name, enabled)}
+              onAddMcp={(name, command, args, env) => bridge.addMcpServer(name, command, args, env)}
+              onRemoveMcp={(name) => bridge.removeMcpServer(name)}
+            />
+          )}
+          {view === "automations" && <AutomationPage bridge={bridge} info={info} />}
+          {view === "media" && <MediaPage />}
+          {view === "usage" && <UsagePage info={info} />}
+          {view === "settings" && (
+            <SettingsPage
+              info={info}
+              onSaveKey={(name, key) => void bridge.saveProviderKey(name, key)}
+              onSetActive={(name) => void bridge.setActiveProvider(name)}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

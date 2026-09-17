@@ -137,6 +137,8 @@ button {
 
 .session-list {
   flex: 1;
+  /* 允许收缩：否则列表过长时把脚注（助理/提示）顶出侧栏底部 */
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
