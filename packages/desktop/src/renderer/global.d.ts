@@ -8,3 +8,8 @@ declare global {
 }
 
 export {};
+
+declare module "*.png" {
+  const src: string;
+  export default src;
+}

@@ -150,6 +150,8 @@ async function createWindow(): Promise<void> {
     backgroundColor: "#f7f6fa",
     autoHideMenuBar: true,
     title: "wcode 桌面版",
+    // 窗口/任务栏图标（打包时 electron-builder 另用同源 .ico 生成 exe 图标）
+    icon: path.join(here, "../../resources/icon.ico"),
     webPreferences: {
       preload: path.join(here, "../preload/index.cjs"),
       contextIsolation: true,

@@ -1,4 +1,5 @@
 /** 左侧功能栏：页面导航（会话/插件/自动化/素材库/用量/设置） */
+import brandIcon from "../assets/icon.png";
 const ICONS: { key: string; title: string; path: string }[] = [
   {
     key: "chat",
@@ -48,7 +49,7 @@ export function Rail({
 }) {
   return (
     <nav className="rail">
-      <div className="brand">w</div>
+      <img className="brand" src={brandIcon} alt="wcode" draggable={false} />
       {ICONS.map((ic) => (
         <button
           key={ic.key}
