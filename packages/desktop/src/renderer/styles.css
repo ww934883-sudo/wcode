@@ -1516,6 +1516,20 @@ button {
   }
 }
 
+/* ---- 欢迎页问候行：图标 + 问候语 ---- */
+.home-greeting-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.home-greeting-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
 /* ---- v2.7 错误卡：分类提示 + 重试/设置入口 ---- */
 .error-card {
   margin: 6px 0 10px 44px;

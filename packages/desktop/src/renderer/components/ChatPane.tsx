@@ -1,3 +1,5 @@
+/** 左侧功能栏同款应用图标 */
+import brandIcon from "../assets/icon.png";
 import type { PermissionDecision } from "@wcode/core";
 import type { PermissionAsk, PermissionMode, ThinkingLevel } from "../../shared/protocol";
 import type { ChatItem, UiState } from "../state";
@@ -138,7 +140,15 @@ export function ChatPane({
           <div className="pane-ask-hint">有待处理的权限确认：{curAsk.toolName}</div>
         )}
         <div className="home">
-          <h1 className="home-greeting">{greeting}</h1>
+          <div className="home-greeting-row">
+            <img
+              className="home-greeting-icon"
+              src={brandIcon}
+              alt="wcode"
+              draggable={false}
+            />
+            <h1 className="home-greeting">{greeting}</h1>
+          </div>
           {composer}
           <div className="home-cards">
             <button className="home-card" onClick={onPickFolder}>
