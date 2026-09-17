@@ -92,6 +92,17 @@ function registerIpc(): void {
   ipcMain.handle("wcode:setMcpEnabled", (_e, name: unknown, enabled: unknown) =>
     rt().setMcpEnabled(String(name), Boolean(enabled)),
   );
+  ipcMain.handle("wcode:addMcpServer", (_e, name: unknown, command: unknown, args: unknown, env: unknown) =>
+    rt().addMcpServer(
+      String(name),
+      String(command),
+      Array.isArray(args) ? args.map(String) : [],
+      env && typeof env === "object" && !Array.isArray(env)
+        ? (Object.fromEntries(Object.entries(env as Record<string, unknown>).map(([k, v]) => [k, String(v)])))
+        : undefined,
+    ),
+  );
+  ipcMain.handle("wcode:removeMcpServer", (_e, name: unknown) => rt().removeMcpServer(String(name)));
   ipcMain.handle("wcode:listAutomations", () => rt().listAutomations());
   ipcMain.handle("wcode:addAutomation", (_e, spec: unknown) => {
     const s = spec as Record<string, unknown>;

@@ -96,7 +96,7 @@ export class DesktopRuntime {
 
   async init(): Promise<void> {
     try {
-      this.config = await loadConfig({ overrides: {}, cwd: this.currentCwd });
+      this.config = await loadConfig({ overrides: {}, cwd: this.currentCwd, homeDir: path.join(this.homeDir, ".wcode") });
     } catch (err) {
       this.config = null;
       this.notice = `配置加载失败（${errorMessage(err)}）`;
@@ -518,6 +518,61 @@ export class DesktopRuntime {
     this.opts.cb.onInfo();
   }
 
+  /** 新增 MCP 服务器：写入用户级 settings → 重载配置 → 立即连接 */
+  async addMcpServer(
+    name: string,
+    command: string,
+    args: string[],
+    env?: Record<string, string>,
+  ): Promise<void> {
+    const key = name.trim();
+    if (!key) throw new Error("请填写服务器名称");
+    if (!command.trim()) throw new Error("请填写启动命令");
+    await patchUserSettings((obj) => {
+      const servers = (obj.mcpServers as Record<string, unknown> | undefined) ?? {};
+      if (key in servers) throw new Error(`用户级配置中已存在 MCP 服务器「${key}」`);
+      servers[key] = {
+        command: command.trim(),
+        args: args.filter((a) => a.trim() !== ""),
+        ...(env && Object.keys(env).length > 0 ? { env } : {}),
+      };
+      obj.mcpServers = servers;
+    }, this.homeDir);
+    await this.reloadConfig();
+    const cfg = this.config?.mcpServers?.[key];
+    if (cfg) {
+      try {
+        await this.registry.registerSource(await createMcpToolSource(key, cfg));
+        this.mcpConnected.add(key);
+        this.notice = `MCP ${key} 已连接`;
+      } catch (err) {
+        this.mcpProblems.push(`MCP ${key}: ${errorMessage(err)}`);
+        this.notice = `MCP ${key} 已保存，但连接失败：${errorMessage(err)}`;
+      }
+    }
+    this.opts.cb.onInfo();
+  }
+
+  /** 删除 MCP 服务器：只允许删用户级条目；项目级配置提示去编辑项目文件 */
+  async removeMcpServer(name: string): Promise<void> {
+    await patchUserSettings((obj) => {
+      const servers = (obj.mcpServers as Record<string, unknown> | undefined) ?? {};
+      if (!(name in servers)) {
+        throw new Error(
+          `「${name}」不在用户级 ~/.wcode/settings.json 中（可能来自项目级 .wcode/settings.json），请编辑对应配置文件删除`,
+        );
+      }
+      delete servers[name];
+      obj.mcpServers = servers;
+    }, this.homeDir);
+    this.mcpDisabled.delete(name);
+    this.mcpConnected.delete(name);
+    await this.reloadConfig();
+    await this.rebuildRegistry();
+    this.notice = `MCP ${name} 已删除`;
+    this.opts.cb.onInfo();
+  }
+
   async saveProviderKey(name: string, key: string): Promise<void> {
     await patchUserSettings((obj) => {
       const providers = (obj.providers as Record<string, Record<string, unknown>> | undefined) ?? {};
@@ -571,7 +626,7 @@ export class DesktopRuntime {
 
   private async reloadConfig(): Promise<void> {
     try {
-      this.config = await loadConfig({ overrides: {}, cwd: this.currentCwd });
+      this.config = await loadConfig({ overrides: {}, cwd: this.currentCwd, homeDir: path.join(this.homeDir, ".wcode") });
       const cfg = this.config.providers[this.activeProviderName()];
       const key = cfg?.apiKey ?? (cfg ? (process.env[cfg.apiKeyEnv] ?? "") : "");
       if (this.mode === "real" && cfg && key) this.apiKey = key;
@@ -643,7 +698,19 @@ export class DesktopRuntime {
         active: name === this.activeProviderName(),
       })),
       stats: stats ?? { sessionCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0 },
+      pricing: this.pricingInfo(),
       notice: [this.notice, ...this.mcpProblems].filter(Boolean).join("；") || undefined,
+    };
+  }
+
+  /** 激活服务商的计价比价（settings.json priceInput/priceOutput）；未配置返回 undefined */
+  private pricingInfo(): RuntimeInfo["pricing"] {
+    const cfg = this.config?.providers[this.activeProviderName()];
+    if (!cfg?.priceInput || !cfg?.priceOutput) return undefined;
+    return {
+      inputPerMillion: cfg.priceInput,
+      outputPerMillion: cfg.priceOutput,
+      currency: cfg.priceCurrency ?? "元",
     };
   }
 }

@@ -241,6 +241,8 @@ export function App() {
           <PluginsPage
             info={info}
             onToggleMcp={(name, enabled) => void bridge.setMcpEnabled(name, enabled)}
+            onAddMcp={(name, command, args, env) => bridge.addMcpServer(name, command, args, env)}
+            onRemoveMcp={(name) => bridge.removeMcpServer(name)}
           />
         )}
         {view === "automations" && <AutomationPage bridge={bridge} info={info} />}

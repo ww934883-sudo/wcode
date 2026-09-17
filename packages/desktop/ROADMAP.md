@@ -32,7 +32,8 @@ CodePilot 式欢迎页（居中问候 + 引导卡）与一体化输入卡。
 1. electron-builder：NSIS 安装包 + 应用图标 + electron-updater 自动更新。
 2. CI：tag 触发 Windows 出包（参考 CodePilot 流水线思路，不拷代码——BSL）。
 3. 安全审计：key 不进日志、渲染层零接触路径复核、CSP 收紧。
-4. 成本统计：provider 定价换算，用量页显示费用。
+4. 成本统计 ✅：provider 配置加可选 priceInput/priceOutput/priceCurrency
+   （单位 priceCurrency/百万 tokens），用量页显示费用估算卡；未配置给配置指引。
 5. SQLite 存储回归（Electron 内置 Node 与 `node:sqlite` 版本对齐后；jsonl 先顶）。
 
 ## M3-D+：功能补全（按价值排序）
@@ -42,8 +43,11 @@ CodePilot 式欢迎页（居中问候 + 引导卡）与一体化输入卡。
   执行（不开子进程；权限询问自动拒绝，会话 jsonl 落盘可回看）；
   渲染层「定时任务」页：cron/一次性创建、启停、手动运行、运行记录、删除。
   浏览器预览模式为内存 mock。
-- 检查点原地回退：现在只有分叉（中）。
-- MCP 配置管理：增删改 server，现在只读 + 启停（中）。
+- 检查点原地回退 ✅：core truncate 标记行（jsonl 标记可恢复/sqlite 真删除，
+  重放/列表/搜索/统计四路对拍）+ 桌面用户消息旁 ⏪ 按钮（运行守卫 + 确认框）。
+- MCP 配置管理 ✅：插件页增删 server（写用户级 settings，项目级条目引导改文件）；
+  新增后立即连接，失败给可读提示。顺带修复：loadConfig 在 demo 模式下未传
+  homeDir，设置读写与真实 ~/.wcode 分裂的装配裂缝。
 - 图片生成 + 素材库：需媒体类 provider 端口（大）。
 - 远程 Bridge（飞书/Telegram）：AgentHost 第五实现（大）。
 - 生成式 UI（大，最后）。

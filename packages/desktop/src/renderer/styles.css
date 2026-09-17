@@ -1655,3 +1655,12 @@ button {
   gap: 4px;
   align-items: center;
 }
+
+/* ---- v3.1 费用估算卡 ---- */
+.stat-card.cost {
+  border-color: var(--accent);
+}
+
+.stat-card.cost .stat-num {
+  color: var(--accent);
+}

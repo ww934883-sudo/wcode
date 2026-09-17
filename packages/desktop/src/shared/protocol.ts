@@ -110,6 +110,14 @@ export interface StatsInfo {
   outputTokens: number;
 }
 
+/** 激活服务商的单价比价（settings.json 的 priceInput/priceOutput，可选） */
+export interface PricingInfo {
+  inputPerMillion: number;
+  outputPerMillion: number;
+  /** 计价货币符号，如 "元" / "$"，缺省 "元" */
+  currency: string;
+}
+
 export interface RuntimeInfo {
   mode: "demo" | "real";
   providerName: string;
@@ -126,6 +134,8 @@ export interface RuntimeInfo {
   mcpServers: McpEntry[];
   providers: ProviderEntry[];
   stats: StatsInfo;
+  /** 激活服务商的计价配置；未配置则用量页只显示 token 数 */
+  pricing?: PricingInfo;
   notice?: string;
 }
 
@@ -180,6 +190,10 @@ export interface WcodeBridge {
   saveProviderKey(name: string, key: string): Promise<void>;
   setActiveProvider(name: string): Promise<void>;
   setMcpEnabled(name: string, enabled: boolean): Promise<void>;
+  /** MCP 配置管理：写用户级 settings.json；新增后立即连接 */
+  addMcpServer(name: string, command: string, args: string[], env?: Record<string, string>): Promise<void>;
+  /** 仅允许删除用户级条目；项目级条目会报可行动错误 */
+  removeMcpServer(name: string): Promise<void>;
   /** 自动化任务（主进程内置调度器执行，与 CLI daemon 共库互斥） */
   listAutomations(): Promise<AutomationEntry[]>;
   addAutomation(spec: AutomationSpecInput): Promise<AutomationEntry>;

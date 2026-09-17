@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("wcode", {
   saveProviderKey: (name, key) => ipcRenderer.invoke("wcode:saveProviderKey", name, key),
   setActiveProvider: (name) => ipcRenderer.invoke("wcode:setActiveProvider", name),
   setMcpEnabled: (name, enabled) => ipcRenderer.invoke("wcode:setMcpEnabled", name, enabled),
+  addMcpServer: (name, command, args, env) =>
+    ipcRenderer.invoke("wcode:addMcpServer", name, command, args, env),
+  removeMcpServer: (name) => ipcRenderer.invoke("wcode:removeMcpServer", name),
   listAutomations: () => ipcRenderer.invoke("wcode:listAutomations"),
   addAutomation: (spec) => ipcRenderer.invoke("wcode:addAutomation", spec),
   removeAutomation: (id) => ipcRenderer.invoke("wcode:removeAutomation", id),

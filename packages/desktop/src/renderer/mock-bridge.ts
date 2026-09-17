@@ -39,6 +39,14 @@ export function createMockBridge(): WcodeBridge {
   let thinkingLevel: ThinkingLevel = "medium";
   let persona: string | null = null;
   let mcpConnected = true;
+  // 浏览器预览的用户级 MCP 配置（模拟 settings.json 的 mcpServers 节）
+  const mockSettings: {
+    mcpServers?: Record<string, { command: string; args: string[] }>;
+  } = {
+    mcpServers: {
+      filesystem: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem"] },
+    },
+  };
   let notice: string | undefined =
     "浏览器预览模式：未连接 Electron 主进程，事件由页内脚本回放";
 
@@ -100,13 +108,11 @@ export function createMockBridge(): WcodeBridge {
         { name: "pdf", description: "处理 PDF 文档", source: "user" },
         { name: "docx", description: "生成 Word 文档", source: "project" },
       ],
-      mcpServers: [
-        {
-          name: "filesystem",
-          command: "npx -y @modelcontextprotocol/server-filesystem",
-          connected: mcpConnected,
-        },
-      ],
+      mcpServers: Object.entries(mockSettings.mcpServers ?? {}).map(([n, cfg]) => ({
+        name: n,
+        command: [cfg.command, ...cfg.args].join(" "),
+        connected: mcpConnected,
+      })),
       providers: [
         { name: "anthropic", type: "anthropic", hasKey: false, active: true },
         { name: "zhipu", type: "openai-compatible", hasKey: true, active: false },
@@ -316,6 +322,26 @@ export function createMockBridge(): WcodeBridge {
     },
     setMcpEnabled: async (_name, enabled) => {
       mcpConnected = enabled;
+      bump();
+    },
+    addMcpServer: async (name, command, args, env) => {
+      if (!name.trim()) throw new Error("请填写服务器名称");
+      if (!command.trim()) throw new Error("请填写启动命令");
+      const servers = mockSettings.mcpServers ?? {};
+      if (name in servers) throw new Error(`用户级配置中已存在 MCP 服务器「${name}」`);
+      servers[name] = { command: command.trim(), args };
+      mockSettings.mcpServers = servers;
+      mcpConnected = true;
+      notice = `MCP ${name} 已添加并连接（浏览器预览为模拟数据）`;
+      bump();
+    },
+    removeMcpServer: async (name) => {
+      const servers = mockSettings.mcpServers ?? {};
+      if (!(name in servers)) {
+        throw new Error(`「${name}」不在用户级配置中（可能来自项目级 .wcode/settings.json）`);
+      }
+      delete servers[name];
+      notice = `MCP ${name} 已删除（浏览器预览为模拟数据）`;
       bump();
     },
     listAutomations: async () => [...automations],

@@ -44,6 +44,10 @@ export const configSchema = z.object({
          */
         apiKey: z.string().optional(),
         baseUrl: z.string().optional(),
+        /** 成本统计（可选）：单价比价，单位 = priceCurrency（缺省"元"）/ 每百万 tokens */
+        priceInput: z.number().optional(),
+        priceOutput: z.number().optional(),
+        priceCurrency: z.string().optional(),
       }),
     )
     .default({
