@@ -5,3 +5,4 @@ coverage/
 .DS_Store
 .wcode/
 evals-results/
+.ref-shots/

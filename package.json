@@ -8,15 +8,22 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/provider-anthropic/tsconfig.json && tsc -p packages/cli/tsconfig.json && tsc -p packages/evals/tsconfig.json && tsc -p packages/provider-openai/tsconfig.json",
+    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/provider-anthropic/tsconfig.json && tsc -p packages/cli/tsconfig.json && tsc -p packages/evals/tsconfig.json && tsc -p packages/provider-openai/tsconfig.json && tsc -p packages/desktop/tsconfig.json",
     "lint:deps": "dependency-cruise --config .dependency-cruiser.cjs packages",
     "dev": "pnpm --filter @wcode/cli dev",
-    "eval": "pnpm --filter @wcode/evals dev"
+    "eval": "pnpm --filter @wcode/evals dev",
+    "desktop": "pnpm --filter @wcode/desktop demo"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "dependency-cruiser": "^16.8.1",
     "typescript": "^5.7.2",
     "vitest": "^3.0.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
   }
 }
