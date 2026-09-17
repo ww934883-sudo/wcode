@@ -115,7 +115,31 @@ export function Sidebar({
           title={split ? "退出分屏（Ctrl+\\）" : "分屏双会话（Ctrl+\\）"}
           onClick={onToggleSplit}
         >
-          ⫿
+          {/* 分屏图标：外框 + 中缝；开启时右半格填充高亮 */}
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <rect
+              x="3.25"
+              y="4.25"
+              width="17.5"
+              height="15.5"
+              rx="2.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+            />
+            <path d="M12 4.5v15" stroke="currentColor" strokeWidth="1.7" />
+            {split && (
+              <rect
+                x="13.9"
+                y="6.3"
+                width="4.8"
+                height="11.4"
+                rx="1.2"
+                fill="currentColor"
+                opacity="0.4"
+              />
+            )}
+          </svg>
         </button>
       </div>
       <div className="search">
