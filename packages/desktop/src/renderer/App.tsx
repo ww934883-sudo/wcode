@@ -5,7 +5,7 @@ import { ChatPane, type PaneState } from "./components/ChatPane";
 import { AutomationPage } from "./components/AutomationPage";
 import { MediaPage } from "./components/MediaPage";
 import { PluginsPage } from "./components/PluginsPage";
-import { Rail, type View } from "./components/Rail";
+import { Rail, type Theme, type View } from "./components/Rail";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar } from "./components/Sidebar";
 import { UsagePage } from "./components/UsagePage";
@@ -32,6 +32,16 @@ export function App() {
   const [models, setModels] = useState<string[]>([]);
   const [navOpen, setNavOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchHitEntry[] | null>(null);
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem("wcode-theme");
+    if (saved === "light" || saved === "dark") return saved;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("wcode-theme", theme);
+  }, [theme]);
 
   const panesRef = useRef(panes);
   panesRef.current = panes;
@@ -217,10 +227,12 @@ export function App() {
     >
       <Rail
         view={view}
+        theme={theme}
         onView={(v) => {
           setView(v);
           setNavOpen(false);
         }}
+        onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
       />
       {view === "chat" && chatView}
       <div className="drawer-backdrop" onClick={() => setNavOpen(false)} />

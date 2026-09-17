@@ -17,8 +17,48 @@
   --err: #c4402f;
   --warn-bg: #fff8e6;
   --warn-border: #ecd9a0;
+  --warn-text: #8a6d1f;
+  --ok-bg: #e7f5ee;
+  --ok-border: #bfe3d2;
+  --danger-bg: #fdf3f2;
+  --danger-border: #f3c1c1;
+  --danger-text: #a3382e;
+  --accent-border: #dcd6fa;
+  --bg-muted: #f2f1f7;
+  --on-accent: #ffffff;
   --radius: 10px;
   --mono: "Cascadia Code", Consolas, "JetBrains Mono", monospace;
+  color-scheme: light;
+}
+
+/* ---- 深色主题：同一套语义 token 的暗色取值 ---- */
+:root[data-theme="dark"] {
+  --bg-main: #16151d;
+  --bg-sidebar: #1d1b27;
+  --bg-rail: #232031;
+  --surface: #262435;
+  --border: #363349;
+  --border-strong: #4a4663;
+  --text: #eceaf4;
+  --text-2: #a9a5bd;
+  --text-3: #74718a;
+  --accent: #8677ff;
+  --accent-strong: #9b8fff;
+  --accent-weak: rgba(134, 119, 255, 0.16);
+  --ok: #34c08c;
+  --err: #e0604c;
+  --warn-bg: #3a3222;
+  --warn-border: #5a4c28;
+  --warn-text: #d9b45a;
+  --ok-bg: #1d332b;
+  --ok-border: #2e5a48;
+  --danger-bg: #3a2523;
+  --danger-border: #6b3a34;
+  --danger-text: #f08d7e;
+  --accent-border: #453f6e;
+  --bg-muted: #2e2b3d;
+  --on-accent: #ffffff;
+  color-scheme: dark;
 }
 
 * {
@@ -89,7 +129,7 @@ button {
 }
 
 .rail-btn:hover {
-  background: rgba(91, 77, 240, 0.1);
+  background: var(--accent-weak);
   color: var(--accent);
 }
 
@@ -97,6 +137,10 @@ button {
   background: var(--surface);
   color: var(--accent);
   box-shadow: 0 1px 3px rgba(31, 29, 42, 0.08);
+}
+
+.rail-theme {
+  margin-top: auto;
 }
 
 /* ── 会话侧栏 ───────────────────────────── */
@@ -156,7 +200,7 @@ button {
 }
 
 .session:hover {
-  background: rgba(91, 77, 240, 0.07);
+  background: var(--accent-weak);
 }
 
 .session.active {
@@ -242,14 +286,14 @@ button {
 
 .badge.demo {
   background: var(--warn-bg);
-  color: #8a6d1f;
+  color: var(--warn-text);
   border: 1px solid var(--warn-border);
 }
 
 .badge.real {
   background: var(--accent-weak);
   color: var(--accent);
-  border: 1px solid #dcd6fa;
+  border: 1px solid var(--accent-border);
 }
 
 .cwd {
@@ -296,7 +340,7 @@ button {
 
 .msg.user .bubble {
   background: var(--accent-weak);
-  border: 1px solid #dcd6fa;
+  border: 1px solid var(--accent-border);
   border-radius: 14px 14px 4px 14px;
   padding: 9px 14px;
   max-width: 78%;
@@ -355,13 +399,13 @@ button {
 .md code {
   font-family: var(--mono);
   font-size: 12.5px;
-  background: #f2f1f7;
+  background: var(--bg-muted);
   border-radius: 4px;
   padding: 1px 5px;
 }
 
 .md pre {
-  background: #f2f1f7;
+  background: var(--bg-muted);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
@@ -481,7 +525,7 @@ button {
 .tool-input pre {
   margin: 6px 0 2px 22px;
   font-size: 11.5px;
-  background: #f2f1f7;
+  background: var(--bg-muted);
   border-radius: 6px;
   padding: 8px 10px;
   overflow-x: auto;
@@ -507,7 +551,7 @@ button {
 .perm-input {
   margin: 0 0 10px;
   font-size: 11.5px;
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--surface);
   border: 1px solid var(--warn-border);
   border-radius: 6px;
   padding: 8px 10px;
@@ -571,7 +615,7 @@ button {
 
 .notice.error {
   color: var(--err);
-  background: #fdf0ee;
+  background: var(--danger-bg);
   border-radius: 8px;
   width: fit-content;
   margin: 0 auto;
@@ -888,7 +932,7 @@ button {
   flex-shrink: 0;
   background: var(--warn-bg);
   border-bottom: 1px solid var(--warn-border);
-  color: #8a6d1f;
+  color: var(--warn-text);
   font-size: 12px;
   padding: 5px 16px;
 }
@@ -954,7 +998,7 @@ button {
 .mini-btn {
   font-size: 11px;
   color: var(--accent);
-  border: 1px solid #dcd6fa;
+  border: 1px solid var(--accent-border);
   border-radius: 6px;
   padding: 2px 7px;
   background: var(--accent-weak);
@@ -962,7 +1006,7 @@ button {
 }
 
 .mini-btn:hover {
-  background: #e2ddfc;
+  background: var(--accent-border);
 }
 
 .project-sessions {
@@ -1107,14 +1151,14 @@ button {
 }
 
 .chip.ok {
-  background: #e7f5ee;
+  background: var(--ok-bg);
   color: var(--ok);
-  border-color: #bfe3d2;
+  border-color: var(--ok-border);
 }
 
 .chip.warn {
   background: var(--warn-bg);
-  color: #8a6d1f;
+  color: var(--warn-text);
   border-color: var(--warn-border);
 }
 
@@ -1476,8 +1520,8 @@ button {
 .error-card {
   margin: 6px 0 10px 44px;
   max-width: 560px;
-  border: 1px solid #f3c1c1;
-  background: #fdf3f2;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
   border-radius: 12px;
   padding: 10px 14px;
   display: flex;
@@ -1487,7 +1531,7 @@ button {
 
 .error-card .error-text {
   font-size: 12.5px;
-  color: #a3382e;
+  color: var(--danger-text);
   line-height: 1.5;
   word-break: break-word;
 }
@@ -1574,13 +1618,13 @@ button {
 }
 
 .warn-mark {
-  color: #c47f16;
+  color: var(--warn-text);
 }
 
 .chip.warn {
-  background: #fdf4e3;
+  background: var(--warn-bg);
   color: #9a6a12;
-  border-color: #efd9ac;
+  border-color: var(--warn-border);
 }
 
 .auto-runs {
@@ -1630,8 +1674,8 @@ button {
   border-radius: 8px;
   padding: 7px 10px;
   font-size: 13px;
-  background: #fff;
-  color: var(--text-1);
+  background: var(--surface);
+  color: var(--text);
 }
 
 .auto-inline {

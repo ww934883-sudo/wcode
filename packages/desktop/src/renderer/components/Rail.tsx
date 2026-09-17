@@ -33,8 +33,19 @@ const ICONS: { key: string; title: string; path: string }[] = [
 ];
 
 export type View = "chat" | "plugins" | "automations" | "media" | "usage" | "settings";
+export type Theme = "light" | "dark";
 
-export function Rail({ view, onView }: { view: View; onView: (v: View) => void }) {
+export function Rail({
+  view,
+  theme,
+  onView,
+  onToggleTheme,
+}: {
+  view: View;
+  theme: Theme;
+  onView: (v: View) => void;
+  onToggleTheme: () => void;
+}) {
   return (
     <nav className="rail">
       <div className="brand">w</div>
@@ -50,6 +61,23 @@ export function Rail({ view, onView }: { view: View; onView: (v: View) => void }
           </svg>
         </button>
       ))}
+      <button
+        className="rail-btn rail-theme"
+        title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+        onClick={onToggleTheme}
+      >
+        {theme === "dark" ? (
+          /* 太阳：当前深色，点击切浅色 */
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path d="M12 7a5 5 0 100 10 5 5 0 000-10zm0-5h.01L12 5h-.01L12 2zm0 17h.01L12 22h-.01L12 19zM2 12v-.01L5 12v.01L2 12zm17 0v-.01l3 .01v.01L19 12zM4.2 5.6l.7-.7 2.1 2.1-.7.7-2.1-2.1zm12.8 12.8l.7-.7 2.1 2.1-.7.7-2.1-2.1zM19.8 5.6l-2.1 2.1-.7-.7 2.1-2.1.7.7zM7 18.4l-2.1 2.1-.7-.7 2.1-2.1.7.7z" />
+          </svg>
+        ) : (
+          /* 月亮：当前浅色，点击切深色 */
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path d="M20.6 14.2A8.8 8.8 0 019.8 3.4a.7.7 0 00-.9-.9 9.8 9.8 0 105.3 19 9.6 9.6 0 006.4-6.4.7.7 0 00-.9-.9z" />
+          </svg>
+        )}
+      </button>
     </nav>
   );
 }
