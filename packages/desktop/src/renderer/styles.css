@@ -31,32 +31,32 @@
   color-scheme: light;
 }
 
-/* ---- 深色主题：同一套语义 token 的暗色取值 ---- */
+/* ---- 深色主题：纯黑基底（OLED 友好），紫色 accent 提亮保持对比 ---- */
 :root[data-theme="dark"] {
-  --bg-main: #16151d;
-  --bg-sidebar: #1d1b27;
-  --bg-rail: #232031;
-  --surface: #262435;
-  --border: #363349;
-  --border-strong: #4a4663;
-  --text: #eceaf4;
-  --text-2: #a9a5bd;
-  --text-3: #74718a;
+  --bg-main: #000000;
+  --bg-sidebar: #0c0c0f;
+  --bg-rail: #111114;
+  --surface: #17171b;
+  --border: #2a2a30;
+  --border-strong: #3d3d45;
+  --text: #f2f1f5;
+  --text-2: #a8a6b3;
+  --text-3: #73717e;
   --accent: #8677ff;
   --accent-strong: #9b8fff;
-  --accent-weak: rgba(134, 119, 255, 0.16);
+  --accent-weak: rgba(134, 119, 255, 0.18);
   --ok: #34c08c;
   --err: #e0604c;
-  --warn-bg: #3a3222;
-  --warn-border: #5a4c28;
+  --warn-bg: #2a2419;
+  --warn-border: #4d4126;
   --warn-text: #d9b45a;
-  --ok-bg: #1d332b;
-  --ok-border: #2e5a48;
-  --danger-bg: #3a2523;
-  --danger-border: #6b3a34;
+  --ok-bg: #10241d;
+  --ok-border: #24513e;
+  --danger-bg: #2b1614;
+  --danger-border: #5c2e28;
   --danger-text: #f08d7e;
-  --accent-border: #453f6e;
-  --bg-muted: #2e2b3d;
+  --accent-border: #38335c;
+  --bg-muted: #1c1c22;
   --on-accent: #ffffff;
   color-scheme: dark;
 }
@@ -1728,4 +1728,11 @@ button {
 
 .stat-card.cost .stat-num {
   color: var(--accent);
+}
+
+/* 深色下黑色图标贴近纯黑背景：细描边保持轮廓 */
+:root[data-theme="dark"] .brand,
+:root[data-theme="dark"] .home-greeting-icon {
+  outline: 1px solid var(--border-strong);
+  outline-offset: -1px;
 }
