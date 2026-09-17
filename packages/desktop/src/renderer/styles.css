@@ -660,6 +660,8 @@ button {
 
 .composer textarea {
   flex: 1;
+  /* 默认约 3 行高：min-height 会钳住 JS 的 auto-resize 内联高度 */
+  min-height: 88px;
   border: none;
   outline: none;
   resize: none;
