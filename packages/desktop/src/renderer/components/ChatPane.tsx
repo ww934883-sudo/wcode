@@ -37,6 +37,7 @@ export function ChatPane({
   onAbort,
   onDecide,
   onFork,
+  onRollback,
   onModel,
   onPermissionMode,
   onThinkingLevel,
@@ -56,6 +57,7 @@ export function ChatPane({
   onAbort: () => void;
   onDecide: (askId: string, decision: PermissionDecision) => void;
   onFork: (userTurn: number) => void;
+  onRollback: (userTurn: number) => void;
   onModel: (m: string) => void;
   onPermissionMode: (m: PermissionMode) => void;
   onThinkingLevel: (l: ThinkingLevel) => void;
@@ -172,6 +174,7 @@ export function ChatPane({
         onDecide={onDecide}
         onSuggest={onSend}
         onFork={onFork}
+        onRollback={onRollback}
         onRetry={onSend}
         onOpenSettings={onOpenSettings}
       />

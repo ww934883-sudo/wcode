@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("wcode", {
   openSession: (cwd, sessionId) => ipcRenderer.invoke("wcode:openSession", cwd, sessionId),
   forkSession: (cwd, sessionId, keep) =>
     ipcRenderer.invoke("wcode:forkSession", cwd, sessionId, keep),
+  rollbackSession: (cwd, sessionId, userTurn) =>
+    ipcRenderer.invoke("wcode:rollbackSession", cwd, sessionId, userTurn),
   searchSessions: (keyword) => ipcRenderer.invoke("wcode:search", keyword),
   send: (sessionId, text) => ipcRenderer.invoke("wcode:send", sessionId, text),
   abort: (sessionId) => ipcRenderer.invoke("wcode:abort", sessionId),

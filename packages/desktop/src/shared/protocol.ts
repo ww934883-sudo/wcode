@@ -156,6 +156,15 @@ export interface WcodeBridge {
     sessionId: string,
     userTurn: number,
   ): Promise<{ sessionId: string; messages: Message[] }>;
+  /**
+   * 检查点原地回退：把该会话截断到第 userTurn 个用户轮次（0 起）之前，
+   * 会话 id 不变（区别于分叉），返回回退后的重放消息。
+   */
+  rollbackSession(
+    cwd: string,
+    sessionId: string,
+    userTurn: number,
+  ): Promise<{ sessionId: string; messages: Message[] }>;
   searchSessions(keyword: string): Promise<SearchHitEntry[]>;
   send(sessionId: string, text: string): Promise<void>;
   abort(sessionId: string): Promise<void>;

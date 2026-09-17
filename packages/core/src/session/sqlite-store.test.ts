@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createSessionDriver, type SessionDriver } from "./driver";
 import { openSqliteDb, SqliteSessionStore } from "./sqlite-store";
 import { runMigrations } from "./migrations";
+import { messagesFromSessionLines } from "./resume";
 import { JsonlSessionStore, type SessionLine } from "./store";
 
 /** 同一操作序列跑两种实现，输出可对比的结果（契约对拍，设计 §8） */
@@ -273,6 +274,74 @@ describe("搜索与统计（W-b 契约对拍）", () => {
         outputTokens: 0,
       });
       other.close();
+    } finally {
+      jd.close();
+      sd.close();
+      await rm(jsonlHome, { recursive: true, force: true }).catch(() => {});
+      await rm(sqliteHome, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});
+
+describe("truncate 原地回退（契约对拍）", () => {
+  it("两实现一致：重放截断 + 列表计数 + 搜索剔除 + 统计缩尾", async () => {
+    const jsonlHome = await mkdtemp(join(tmpdir(), "wcode-trunc-j-"));
+    const sqliteHome = await mkdtemp(join(tmpdir(), "wcode-trunc-s-"));
+    const jd = await createSessionDriver({ storageType: "jsonl", cwd: "/proj", homeDir: jsonlHome });
+    const sd = await createSessionDriver({ storageType: "sqlite", cwd: "/proj", homeDir: sqliteHome });
+    try {
+      for (const driver of [jd, sd]) {
+        const { store, sessionId } = await driver.createNew({ cwd: "/proj" });
+        await store.append({ v: 1, type: "message", message: { role: "user", content: "问一" } });
+        await store.append({
+          v: 1,
+          type: "message",
+          message: {
+            role: "assistant",
+            text: "答一",
+            toolCalls: [],
+            usage: { inputTokens: 10, outputTokens: 5 },
+          },
+        });
+        await store.append({ v: 1, type: "message", message: { role: "user", content: "截断后的关键词XYZ" } });
+        await store.append({
+          v: 1,
+          type: "message",
+          message: {
+            role: "assistant",
+            text: "答二",
+            toolCalls: [],
+            usage: { inputTokens: 7, outputTokens: 3 },
+          },
+        });
+        await store.append({ v: 1, type: "truncate", keepMessages: 2, at: "t" });
+        await store.append({ v: 1, type: "message", message: { role: "user", content: "新起点问题" } });
+      }
+
+      for (const driver of [jd, sd]) {
+        const summaries = await driver.listRecent();
+        expect(summaries).toHaveLength(1);
+        expect(summaries[0]?.messageCount).toBe(3); // 保留 2 + 截断后新增 1
+        // 截断部分中的关键词不再命中，保留部分仍可命中
+        const gone = await driver.search("XYZ");
+        expect(gone).toHaveLength(0);
+        const kept = await driver.search("新起点问题");
+        expect(kept).toHaveLength(1);
+        const hits = await driver.search("问一");
+        expect(hits).toHaveLength(1);
+        expect(hits[0]?.messageCount).toBe(3); // 序号与重放一致
+        // 统计：截断掉的 assistant usage 不再计入
+        const stats = await driver.stats();
+        expect(stats.messageCount).toBe(3);
+        expect(stats.inputTokens).toBe(10);
+        expect(stats.outputTokens).toBe(5);
+        // 重放：2 条保留 + 新增 1 条
+        const store = await driver.open(summaries[0]!.sessionId);
+        const lines = await store.load();
+        // 重放语义（jsonl 原始行仍保留，sqlite 已真删除）：2 条保留 + 新增 1 条
+        const replay = messagesFromSessionLines(lines);
+        expect(replay).toHaveLength(3);
+      }
     } finally {
       jd.close();
       sd.close();

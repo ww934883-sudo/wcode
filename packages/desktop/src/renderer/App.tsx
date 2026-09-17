@@ -91,6 +91,21 @@ export function App() {
     }));
   };
 
+  /** 检查点原地回退：会话 id 不变，丢弃该轮次之后的内容（有确认） */
+  const rollback = async (idx: number, userTurn: number) => {
+    const pane = panesRef.current[idx];
+    if (!pane?.sessionId) return;
+    if (!window.confirm("回退到这条消息之前？之后的内容将从当前会话中移除（分叉不受影响）。")) {
+      return;
+    }
+    const res = await bridge.rollbackSession(pane.cwd, pane.sessionId, userTurn);
+    mutatePane(idx, () => ({
+      sessionId: res.sessionId,
+      cwd: pane.cwd,
+      ui: { items: itemsFromMessages(res.messages), usage: null, running: false },
+    }));
+  };
+
   const openSession = async (cwd: string, sessionId: string) => {
     const res = await bridge.openSession(cwd, sessionId);
     mutatePane(activePane, () => ({
@@ -183,6 +198,7 @@ export function App() {
               if (pane.sessionId) void bridge.decide(pane.sessionId, askId, d);
             }}
             onFork={(turn) => void fork(idx, turn)}
+            onRollback={(turn) => void rollback(idx, turn)}
             onModel={(m) => bridge.setModel(m)}
             onPermissionMode={(m) => bridge.setPermissionMode(m)}
             onThinkingLevel={(l) => bridge.setThinkingLevel(l)}

@@ -364,6 +364,41 @@ export class DesktopRuntime {
     return { sessionId: created.sessionId, messages: kept };
   }
 
+  /** 检查点原地回退：截断标记落盘（jsonl 旧数据保留），会话 id 不变 */
+  async rollbackSession(
+    cwd: string,
+    sessionId: string,
+    userTurn: number,
+  ): Promise<{ sessionId: string; messages: Message[] }> {
+    const desk = this.sessions.get(sessionId);
+    if (desk?.running) throw new Error("会话正在运行，请先停止再回退");
+    const driver = await this.driverFor(cwd);
+    const store = await driver.open(sessionId);
+    const messages = messagesFromSessionLines(await store.load());
+    let keep = messages.length;
+    let seen = -1;
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (m && m.role === "user") {
+        seen++;
+        if (seen === userTurn) {
+          keep = i;
+          break;
+        }
+      }
+    }
+    const kept = messages.slice(0, keep);
+    await store.append({ v: 1, type: "truncate", keepMessages: keep, at: new Date().toISOString() });
+    // 已挂载 → 原地替换历史；未挂载 → 挂为活会话（保证下一次 send 可达）
+    if (desk) {
+      desk.session.applyResume(store, kept);
+    } else {
+      await this.mountSession(sessionId, cwd, store, driver, this.providerFor(cwd), kept);
+    }
+    this.opts.cb.onInfo();
+    return { sessionId, messages: kept };
+  }
+
   async runTurn(sessionId: string, text: string): Promise<void> {
     const desk = this.sessions.get(sessionId);
     if (!desk || desk.running || text.trim() === "") return;

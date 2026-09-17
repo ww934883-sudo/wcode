@@ -15,6 +15,7 @@ export function ChatView({
   onDecide,
   onSuggest,
   onFork,
+  onRollback,
   onRetry,
   onOpenSettings,
 }: {
@@ -22,6 +23,7 @@ export function ChatView({
   onDecide: (id: string, decision: PermissionDecision) => void;
   onSuggest: (text: string) => void;
   onFork: (userTurn: number) => void;
+  onRollback: (userTurn: number) => void;
   onRetry: (text: string) => void;
   onOpenSettings: () => void;
 }) {
@@ -64,13 +66,22 @@ export function ChatView({
             case "user":
               return (
                 <div key={item.id} className="msg user">
-                  <button
-                    className="fork-btn"
-                    title="从这里之前的历史分叉一个新会话"
-                    onClick={() => onFork(userTurn)}
-                  >
-                    ⟲
-                  </button>
+                  <span className="user-actions">
+                    <button
+                      className="fork-btn"
+                      title="从这里之前的历史分叉一个新会话"
+                      onClick={() => onFork(userTurn)}
+                    >
+                      ⟲
+                    </button>
+                    <button
+                      className="fork-btn"
+                      title="原地回退到这里：丢弃之后的内容，会话不变"
+                      onClick={() => onRollback(userTurn)}
+                    >
+                      ⏪
+                    </button>
+                  </span>
                   <div className="bubble">{item.text}</div>
                 </div>
               );

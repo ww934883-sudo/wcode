@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JsonlSessionStore } from "./store";
 import { messagesFromSessionLines } from "./resume";
+import type { SessionLine } from "./store";
 import { AgentSession } from "../loop/agent-session";
 import { ToolRegistry, sourceOf } from "../tools/registry";
 import { readTool } from "../tools/builtin/read";
@@ -137,5 +138,49 @@ describe("listRecent（/resume 列表，jsonl 目录扫描实现）", () => {
     } finally {
       await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
     }
+  });
+});
+
+describe("truncate 行（原地回退重放）", () => {
+  it("keepMessages 之后的消息不再出现；后续追加接在截断点上", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wcode-resume-trunc-"));
+    try {
+      const store = new JsonlSessionStore(join(dir, "s1.jsonl"));
+      await store.append({ v: 1, type: "meta", sessionId: "s1", createdAt: "t", cwd: "/x" });
+      for (const c of ["一", "二", "三", "四"]) {
+        await store.append({ v: 1, type: "message", message: { role: "user", content: c } });
+      }
+      await store.append({ v: 1 as const, type: "truncate" as const, keepMessages: 2, at: "t2" });
+      await store.append({ v: 1, type: "message", message: { role: "user", content: "新起点" } });
+      const messages = messagesFromSessionLines(await store.load());
+      expect(messages.map((m) => (m.role === "user" ? m.content : ""))).toEqual([
+        "一",
+        "二",
+        "新起点",
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
+    }
+  });
+
+  it("越界 keep 不变、0 清空、多次截断顺序叠加", () => {
+    const base = (n: number): SessionLine[] =>
+      Array.from({ length: n }, (_, i) => ({
+        v: 1 as const,
+        type: "message" as const,
+        message: { role: "user" as const, content: `m${i}` },
+      }));
+    // 越界不增长
+    expect(messagesFromSessionLines([...base(2), { v: 1 as const, type: "truncate" as const, keepMessages: 9, at: "t" }])).toHaveLength(2);
+    // 0 清空
+    expect(messagesFromSessionLines([...base(2), { v: 1 as const, type: "truncate" as const, keepMessages: 0, at: "t" }])).toHaveLength(0);
+    // 多次叠加：4 → 2 → 1
+    const doubled = [
+      ...base(4),
+      { v: 1 as const, type: "truncate" as const, keepMessages: 2, at: "t1" },
+      ...base(2),
+      { v: 1 as const, type: "truncate" as const, keepMessages: 1, at: "t2" },
+    ];
+    expect(messagesFromSessionLines(doubled)).toHaveLength(1);
   });
 });

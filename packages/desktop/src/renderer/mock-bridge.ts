@@ -242,6 +242,16 @@ export function createMockBridge(): WcodeBridge {
       bump();
       return { sessionId: id, messages: [...kept] };
     },
+    rollbackSession: async (_cwd, sessionId, userTurn) => {
+      const src = sessions.get(sessionId);
+      if (src) {
+        const cut = userIndexOfTurn(src.messages, userTurn);
+        src.messages = src.messages.slice(0, cut);
+        bump();
+        return { sessionId, messages: [...src.messages] };
+      }
+      return { sessionId, messages: [] };
+    },
     searchSessions: async (keyword) => {
       const hits: SearchHitEntry[] = [];
       for (const [id, s] of sessions) {

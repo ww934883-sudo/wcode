@@ -150,6 +150,38 @@ export class SqliteSessionStore implements SessionStore {
       return;
     }
 
+    if (line.type === "truncate") {
+      // 原地回退：sqlite 无追加语义，直接删除截断点之后的消息行并重算计数
+      inTransaction(db, () => {
+        db.prepare("DELETE FROM messages WHERE session_id = ? AND idx >= ?").run(
+          sessionId,
+          line.keepMessages,
+        );
+        const rows = db
+          .prepare("SELECT payload FROM messages WHERE session_id = ? ORDER BY idx")
+          .all(sessionId) as { payload: string }[];
+        let messageCount = 0;
+        let inputTokens = 0;
+        let outputTokens = 0;
+        for (const r of rows) {
+          try {
+            const m = JSON.parse(r.payload) as { role?: string; usage?: { inputTokens: number; outputTokens: number } };
+            messageCount++;
+            if (m.role === "assistant" && m.usage) {
+              inputTokens += m.usage.inputTokens;
+              outputTokens += m.usage.outputTokens;
+            }
+          } catch {
+            // payload 损坏：跳过该行计数，不阻塞回退
+          }
+        }
+        db.prepare(
+          "UPDATE sessions SET message_count = ?, input_tokens = ?, output_tokens = ?, updated_at = ? WHERE id = ?",
+        ).run(messageCount, inputTokens, outputTokens, now, sessionId);
+      });
+      return;
+    }
+
     // message：INSERT + sessions 计数/token 更新 = 单事务（设计 §4）
     const message = line.message;
     const text = messageSearchText(message);

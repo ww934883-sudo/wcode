@@ -8,7 +8,13 @@ import type { Logger } from "../logging/port";
 export type SessionLine =
   | { v: 1; type: "meta"; sessionId: string; createdAt: string; cwd: string }
   | { v: 1; type: "message"; message: Message }
-  | { v: 1; type: "event"; event: Record<string, unknown> };
+  | { v: 1; type: "event"; event: Record<string, unknown> }
+  /**
+   * 原地回退标记（检查点回退）：把重放历史截断为前 keepMessages 条，
+   * 之后的旧消息行保留在文件里但不再重放；后续新消息接在截断点上。
+   * jsonl 是标记（旧数据可恢复），sqlite 实现为真删除。
+   */
+  | { v: 1; type: "truncate"; keepMessages: number; at: string };
 
 /** /resume 列表项（会话 id 即可重新打开，路径不外泄给调用方） */
 export interface SessionSummary {
@@ -139,6 +145,9 @@ export class JsonlSessionStore implements SessionStore {
           }
           if (parsed.type === "meta") {
             createdAt = parsed.createdAt;
+          } else if (parsed.type === "truncate") {
+            // 原地回退：计数与重放语义一致（只缩不涨）
+            messageCount = Math.min(messageCount, parsed.keepMessages);
           } else if (parsed.type === "message") {
             messageCount++;
             if (!preview && parsed.message.role === "user") {
@@ -192,6 +201,15 @@ export class JsonlSessionStore implements SessionStore {
             createdAt = parsed.createdAt;
             continue;
           }
+          if (parsed.type === "truncate") {
+            // 原地回退：丢弃截断点之后的暂存命中，计数与重放语义一致
+            messageCount = Math.min(messageCount, parsed.keepMessages);
+            for (let i = pending.length - 1; i >= 0; i--) {
+              const p = pending[i];
+              if (p && p.messageIndex > parsed.keepMessages) pending.splice(i, 1);
+            }
+            continue;
+          }
           if (parsed.type !== "message") continue;
           messageCount++;
           const searchable = messageSearchText(parsed.message);
@@ -233,6 +251,8 @@ export class JsonlSessionStore implements SessionStore {
     };
     for (const file of files) {
       out.sessionCount++;
+      // 截断可发生在任意位置：逐消息记录用量，截断时切掉尾部再求和
+      const usages: { inTok: number; outTok: number }[] = [];
       try {
         const text = await readFile(join(dir, file), "utf8");
         for (const line of text.split("\n")) {
@@ -244,17 +264,25 @@ export class JsonlSessionStore implements SessionStore {
           } catch {
             continue;
           }
+          if (parsed.type === "truncate") {
+            usages.length = Math.min(usages.length, parsed.keepMessages);
+            continue;
+          }
           if (parsed.type !== "message") continue;
-          out.messageCount++;
           const usage =
             parsed.message.role === "assistant" ? parsed.message.usage : undefined;
-          if (usage) {
-            out.inputTokens += usage.inputTokens;
-            out.outputTokens += usage.outputTokens;
-          }
+          usages.push({
+            inTok: usage?.inputTokens ?? 0,
+            outTok: usage?.outputTokens ?? 0,
+          });
         }
       } catch {
         continue;
+      }
+      out.messageCount += usages.length;
+      for (const u of usages) {
+        out.inputTokens += u.inTok;
+        out.outputTokens += u.outTok;
       }
     }
     return out;

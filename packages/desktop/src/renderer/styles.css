@@ -1648,3 +1648,10 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- v3.0 原地回退：用户消息双按钮 ---- */
+.user-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
