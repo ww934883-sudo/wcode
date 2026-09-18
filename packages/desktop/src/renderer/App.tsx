@@ -371,6 +371,7 @@ export function App() {
               onSetEnabled={(name, enabled) => void bridge.setProviderEnabled(name, enabled)}
               onSetActive={(name) => void bridge.setActiveProvider(name)}
               onSaveKey={(name, key) => bridge.saveProviderKey(name, key)}
+              onGetKey={(name) => bridge.getProviderKey(name)}
               onTestModel={(p, m) => bridge.testModel(p, m)}
               onAddModel={(p, m, c) => bridge.addCatalogModel(p, m, c)}
               onRemoveModel={(p, m) => void bridge.removeCatalogModel(p, m)}

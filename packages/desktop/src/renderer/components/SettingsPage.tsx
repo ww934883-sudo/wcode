@@ -29,6 +29,7 @@ export function SettingsPage({
   onSetEnabled,
   onSetActive,
   onSaveKey,
+  onGetKey,
   onTestModel,
   onAddModel,
   onRemoveModel,
@@ -43,6 +44,7 @@ export function SettingsPage({
   onSetEnabled: (name: string, enabled: boolean) => void;
   onSetActive: (name: string) => void;
   onSaveKey: (name: string, key: string) => Promise<void>;
+  onGetKey: (name: string) => Promise<string>;
   onTestModel: (provider: string, model: string) => Promise<{ ok: boolean; latencyMs: number; sample?: string; error?: string }>;
   onAddModel: (provider: string, model: string, contextLabel?: string) => Promise<void>;
   onRemoveModel: (provider: string, model: string) => void;
@@ -66,18 +68,30 @@ export function SettingsPage({
   const [renameDraft, setRenameDraft] = useState("");
   const [urlDraft, setUrlDraft] = useState("");
   const [keyDraft, setKeyDraft] = useState("");
+  const [keyOriginal, setKeyOriginal] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
   const [testState, setTestState] = useState<Record<string, TestState>>({});
   const [editingModel, setEditingModel] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({ model: "", contextLabel: "" });
   const [newModel, setNewModel] = useState({ model: "", contextLabel: "" });
 
-  // 切换供应商时同步草稿
+  // 切换供应商时同步草稿；已配置的 key 以密文（password 框）回填，点眼睛看明文
   useEffect(() => {
     setUrlDraft(cur?.baseUrl ?? "");
-    setKeyDraft("");
     setRenaming(false);
     setEditingModel(null);
+    if (!cur?.name) return;
+    let alive = true;
+    void onGetKey(cur.name)
+      .then((k) => {
+        if (!alive) return;
+        setKeyDraft(k);
+        setKeyOriginal(k);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [cur?.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (fn: () => Promise<unknown> | unknown): Promise<boolean> => {
@@ -431,13 +445,14 @@ export function SettingsPage({
                   <div className="field-row">
                     <input
                       type={keyVisible ? "text" : "password"}
-                      placeholder={cur.hasKey ? "已配置（输入可覆盖）" : "sk-…"}
+                      placeholder={cur.hasKey ? "" : "sk-…"}
                       value={keyDraft}
                       onChange={(e) => setKeyDraft(e.target.value)}
                     />
                     <button
                       className="icon-btn"
                       title={keyVisible ? "隐藏" : "显示"}
+                      disabled={!cur.hasKey && keyDraft === ""}
                       onClick={() => setKeyVisible((v) => !v)}
                     >
                       <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -456,11 +471,11 @@ export function SettingsPage({
                     </button>
                     <button
                       className="btn primary"
-                      disabled={keyDraft === ""}
+                      disabled={keyDraft === "" || keyDraft === keyOriginal}
                       onClick={() =>
                         void run(async () => {
                           await onSaveKey(cur.name, keyDraft);
-                          setKeyDraft("");
+                          setKeyOriginal(keyDraft);
                         })
                       }
                     >

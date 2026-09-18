@@ -809,6 +809,17 @@ export class DesktopRuntime {
     this.opts.cb.onInfo();
   }
 
+  /**
+   * 读取供应商已存的 key（设置页回填密文框/点眼睛显示明文）。
+   * 安全边界：明文仅在用户主动打开设置页时经 IPC 传给渲染层，
+   * 日志、事件推送、info() 一律不携带 key。
+   */
+  async getProviderKey(name: string): Promise<string> {
+    const cfg = this.config?.providers[name.trim()];
+    if (!cfg) return "";
+    return cfg.apiKey ?? (cfg ? process.env[cfg.apiKeyEnv] ?? "" : "");
+  }
+
   async saveProviderKey(name: string, key: string): Promise<void> {
     await patchUserSettings((obj) => {
       const providers = (obj.providers as Record<string, Record<string, unknown>> | undefined) ?? {};

@@ -95,6 +95,7 @@ function registerIpc(): void {
   ipcMain.handle("wcode:testModel", (_e, provider: unknown, model: unknown) =>
     rt().testModel(String(provider), String(model)),
   );
+  ipcMain.handle("wcode:getProviderKey", (_e, name: unknown) => rt().getProviderKey(String(name)));
   ipcMain.handle("wcode:setModel", (_e, model: unknown) => {
     rt().setModel(String(model));
   });

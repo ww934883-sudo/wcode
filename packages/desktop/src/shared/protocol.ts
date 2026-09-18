@@ -217,6 +217,8 @@ export interface WcodeBridge {
   setProviderEnabled(name: string, enabled: boolean): Promise<void>;
   /** 连通性测试：对（供应商, 模型）发一次最小请求 */
   testModel(provider: string, model: string): Promise<ModelTestResult>;
+  /** 读取供应商已存的 key（设置页密文回填；仅用户主动查看场景） */
+  getProviderKey(name: string): Promise<string>;
   /** 以下三项对新会话生效（模型选择即时热切活会话） */
   setModel(model: string): Promise<void>;
   setContextTokens(tokens: number): Promise<void>;

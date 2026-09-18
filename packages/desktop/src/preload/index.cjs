@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("wcode", {
   setProviderEnabled: (name, enabled) =>
     ipcRenderer.invoke("wcode:setProviderEnabled", name, enabled),
   testModel: (provider, model) => ipcRenderer.invoke("wcode:testModel", provider, model),
+  getProviderKey: (name) => ipcRenderer.invoke("wcode:getProviderKey", name),
   setModel: (model) => ipcRenderer.invoke("wcode:setModel", model),
   setContextTokens: (tokens) => ipcRenderer.invoke("wcode:setContextTokens", tokens),
   setPermissionMode: (mode) => ipcRenderer.invoke("wcode:setPermissionMode", mode),

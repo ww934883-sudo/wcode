@@ -399,6 +399,10 @@ export function createMockBridge(): WcodeBridge {
       latencyMs: 420,
       sample: `${provider}/${m} 连通（浏览器预览固定成功）`,
     }),
+    getProviderKey: async (name) => {
+      const p = mockProviders.find((x) => x.name === name);
+      return p?.hasKey ? "sk-mock-0123456789abcdef" : "";
+    },
     setModel: async (m) => {
       model = m;
       bump();
