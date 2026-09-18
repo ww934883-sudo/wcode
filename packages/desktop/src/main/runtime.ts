@@ -280,7 +280,11 @@ export class DesktopRuntime {
 
   private sessionHost(sessionId: string): AgentHost {
     return {
-      emit: (ev) => this.host.emit(sessionId, ev),
+      emit: (ev) => {
+        this.host.emit(sessionId, ev);
+        // turn_start 时用户消息已落盘：新会话首轮即时推送，侧栏不用等回答结束
+        if (ev.type === "turn_start") this.opts.cb.onInfo();
+      },
       requestPermission: (req) => this.host.requestPermission(sessionId, req),
     };
   }
