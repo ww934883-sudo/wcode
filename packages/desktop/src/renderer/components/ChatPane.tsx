@@ -3,7 +3,7 @@ import brandIcon from "../assets/icon.png";
 import type { PermissionDecision } from "@wcode/core";
 import type { PermissionAsk, PermissionMode, ThinkingLevel } from "../../shared/protocol";
 import type { ChatItem, UiState } from "../state";
-import { Composer } from "./Composer";
+import { Composer, type ComposerCommand } from "./Composer";
 import { ChatView } from "./ChatView";
 
 export interface PaneState {
@@ -45,6 +45,8 @@ export function ChatPane({
   onThinkingLevel,
   onPickFolder,
   onOpenSettings,
+  commands,
+  onCommand,
 }: {
   pane: PaneState;
   models: string[];
@@ -64,6 +66,9 @@ export function ChatPane({
   onThinkingLevel: (l: ThinkingLevel) => void;
   onPickFolder: () => void;
   onOpenSettings: () => void;
+  /** 斜杠命令面板（透传 Composer） */
+  commands?: ComposerCommand[];
+  onCommand?: (id: string) => void;
 }) {
   const curAsk = pane.ui.items.find(
     (it): it is Extract<ChatItem, { kind: "permission" }> =>
@@ -81,6 +86,8 @@ export function ChatPane({
       running={pane.ui.running}
       onSend={onSend}
       onAbort={onAbort}
+      commands={commands}
+      onCommand={onCommand}
       projectName={pane.cwd.split(/[\\/]/).pop() || pane.cwd}
       toolbar={
         <>

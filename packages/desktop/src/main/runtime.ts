@@ -409,6 +409,18 @@ export class DesktopRuntime {
     this.opts.cb.onInfo();
   }
 
+  /** 置顶 / 取消置顶会话（写用户级 settings，跨重启持久） */
+  async setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
+    await patchUserSettings((obj) => {
+      const cur = Array.isArray(obj.pinnedSessions) ? (obj.pinnedSessions as string[]) : [];
+      obj.pinnedSessions = pinned
+        ? [...new Set([...cur, sessionId])]
+        : cur.filter((x) => x !== sessionId);
+    }, this.homeDir);
+    await this.reloadConfig();
+    this.opts.cb.onInfo();
+  }
+
   async runTurn(sessionId: string, text: string): Promise<void> {
     const desk = this.sessions.get(sessionId);
     if (!desk || desk.running || text.trim() === "") return;
@@ -662,12 +674,16 @@ export class DesktopRuntime {
     for (const cwd of orderedCwds) {
       const driver = await this.driverFor(cwd);
       const recent = await driver.listRecent(30).catch(() => []);
+      const pinned = new Set(this.config?.pinnedSessions ?? []);
       const sessions: SessionEntry[] = recent.map((s) => ({
         id: s.sessionId,
-        title: s.preview || "(空会话)",
+        title: s.preview || "(无标题会话)",
         time: this.fmtTime(s.createdAt),
         messageCount: s.messageCount,
+        pinned: pinned.has(s.sessionId),
       }));
+      // 置顶前置；sort 稳定，组内保持 listRecent 的新→旧
+      sessions.sort((a, b) => Number(b.pinned) - Number(a.pinned));
       projects.push({
         cwd,
         label: path.basename(cwd) || cwd,

@@ -10,6 +10,8 @@ export interface SessionEntry {
   title: string;
   time: string;
   messageCount: number;
+  /** 用户置顶（排序时置顶项前置，置顶态跨重启持久） */
+  pinned: boolean;
 }
 
 /** 按工作目录（=项目）分组的会话列表 */
@@ -177,6 +179,8 @@ export interface WcodeBridge {
   ): Promise<{ sessionId: string; messages: Message[] }>;
   /** 删除会话（运行中的会话拒绝；磁盘存储连消息一起清除，不可恢复） */
   deleteSession(cwd: string, sessionId: string): Promise<void>;
+  /** 置顶 / 取消置顶会话（写用户级 settings，跨重启持久） */
+  setSessionPinned(sessionId: string, pinned: boolean): Promise<void>;
   searchSessions(keyword: string): Promise<SearchHitEntry[]>;
   send(sessionId: string, text: string): Promise<void>;
   abort(sessionId: string): Promise<void>;

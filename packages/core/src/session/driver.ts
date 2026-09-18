@@ -26,7 +26,7 @@ export interface SessionDriver {
   findLatest(): Promise<string | null>;
   /** 绑定到既有会话（/resume、--resume <id>） */
   open(sessionId: string): Promise<SessionStore>;
-  /** 新建会话并立即落 meta；返回生成的 sessionId */
+  /** 新建会话；meta 随首条 append 懒落盘（空会话不占存储），返回生成的 sessionId */
   createNew(init: { cwd: string }): Promise<{ sessionId: string; store: SessionStore }>;
   /** 跨会话关键词搜索（W-b /sessions <关键词>）：消息级命中，新会话在前 */
   search(keyword: string, limit?: number): Promise<SessionSearchHit[]>;
@@ -80,13 +80,13 @@ export async function createSessionDriver(
         new SqliteSessionStore({ db, sessionId, projectHash, cwd: opts.cwd, log }),
       createNew: async (init) => {
         const sessionId = newSessionId();
-        const store = new SqliteSessionStore({ db, sessionId, projectHash, cwd: init.cwd, log });
-        await store.append({
-          v: 1,
-          type: "meta",
+        const store = new SqliteSessionStore({
+          db,
           sessionId,
-          createdAt: new Date().toISOString(),
+          projectHash,
           cwd: init.cwd,
+          log,
+          pendingCreatedAt: new Date().toISOString(),
         });
         return { sessionId, store };
       },
@@ -108,17 +108,22 @@ export async function createSessionDriver(
         // jsonlSessionPath 自带 id 白名单校验（防路径穿越）；文件不存在视为已删
         await rm(jsonlSessionPath(sessionsDir, sessionId), { force: true });
       },
-      open: async (sessionId) => new JsonlSessionStore(jsonlSessionPath(sessionsDir, sessionId), log),
+      open: async (sessionId) =>
+        new JsonlSessionStore(
+          jsonlSessionPath(sessionsDir, sessionId),
+          log,
+          // 懒 meta 自愈：向尚未落盘的会话（新建未发消息）追加时补写 meta；
+          // 文件已存在的会话 meta 必然在，append 侧会跳过
+          { v: 1, type: "meta", sessionId, createdAt: new Date().toISOString(), cwd: opts.cwd },
+        ),
     createNew: async (init) => {
       const sessionId = newSessionId();
-      const store = new JsonlSessionStore(jsonlSessionPath(sessionsDir, sessionId), log);
-      await store.append({
-        v: 1,
-        type: "meta",
-        sessionId,
-        createdAt: new Date().toISOString(),
-        cwd: init.cwd,
-      }).catch(() => {}); // 与旧行为一致：meta 落盘失败不阻塞启动
+      const store = new JsonlSessionStore(
+        jsonlSessionPath(sessionsDir, sessionId),
+        log,
+        // meta 懒落盘：首条 append 时才写文件，空会话不占存储
+        { v: 1, type: "meta", sessionId, createdAt: new Date().toISOString(), cwd: init.cwd },
+      );
       return { sessionId, store };
     },
     close: () => undefined,

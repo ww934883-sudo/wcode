@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PermissionDecision } from "@wcode/core";
 import type { PermissionAsk, RuntimeInfo, SearchHitEntry } from "../shared/protocol";
 import { ChatPane, type PaneState } from "./components/ChatPane";
+import type { ComposerCommand } from "./components/Composer";
 import { AutomationPage } from "./components/AutomationPage";
 import { MediaPage } from "./components/MediaPage";
 import { PluginsPage } from "./components/PluginsPage";
@@ -128,6 +129,15 @@ export function App() {
     setSearchResults(null);
   };
 
+  /** 置顶 / 取消置顶（写用户级配置，失败时静默——下一次 info 推送会还原状态） */
+  const togglePin = async (sessionId: string, pinned: boolean) => {
+    try {
+      await bridge.setSessionPinned(sessionId, pinned);
+    } catch {
+      // 忽略：置顶失败不打断主流程
+    }
+  };
+
   /** 删除会话：确认后删存储，引用它的分屏面板一并回到新会话态 */
   const deleteSession = async (cwd: string, sessionId: string, title: string) => {
     if (!window.confirm(`删除会话「${title}」？消息记录将从磁盘清除，不可恢复。`)) {
@@ -177,6 +187,64 @@ export function App() {
     }
   };
 
+  /** 斜杠命令表：输入 / 罗列全部，继续输入按别名/名称过滤，选中即执行 */
+  const COMMANDS: ComposerCommand[] = [
+    { id: "new", label: "新会话", hint: "清空当前面板", aliases: ["new", "clear"] },
+    { id: "split", label: "分屏开关", hint: "Ctrl+\\", aliases: ["split"] },
+    { id: "theme", label: "切换深色 / 浅色主题", aliases: ["theme", "dark", "light"] },
+    { id: "model", label: "模型设置", hint: "打开设置页", aliases: ["model"] },
+    { id: "thinking-off", label: "思考级别：关闭", aliases: ["thinking-off"] },
+    { id: "thinking-low", label: "思考级别：低", aliases: ["thinking-low"] },
+    { id: "thinking-medium", label: "思考级别：中", aliases: ["thinking-medium"] },
+    { id: "thinking-high", label: "思考级别：高", aliases: ["thinking-high"] },
+    { id: "usage", label: "用量统计", aliases: ["stats", "usage"] },
+    { id: "automations", label: "定时任务", aliases: ["automations", "cron", "schedule"] },
+    { id: "plugins", label: "插件与 MCP", aliases: ["plugins", "mcp"] },
+    { id: "media", label: "素材库", aliases: ["media"] },
+    { id: "settings", label: "设置", aliases: ["settings"] },
+  ];
+
+  const runCommand = (id: string) => {
+    const viewOf: Partial<Record<string, View>> = {
+      automations: "automations",
+      media: "media",
+      plugins: "plugins",
+      settings: "settings",
+      usage: "usage",
+      model: "settings",
+    };
+    const target = viewOf[id];
+    if (target) {
+      setView(target);
+      setNavOpen(false);
+      return;
+    }
+    switch (id) {
+      case "new":
+        newChat();
+        setNavOpen(false);
+        break;
+      case "split":
+        toggleSplit();
+        break;
+      case "theme":
+        setTheme((t) => (t === "dark" ? "light" : "dark"));
+        break;
+      case "thinking-off":
+        void bridge.setThinkingLevel("off");
+        break;
+      case "thinking-low":
+        void bridge.setThinkingLevel("low");
+        break;
+      case "thinking-medium":
+        void bridge.setThinkingLevel("medium");
+        break;
+      case "thinking-high":
+        void bridge.setThinkingLevel("high");
+        break;
+    }
+  };
+
   // Ctrl+\（macOS ⌘+\）：分屏开关
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -207,6 +275,7 @@ export function App() {
         onSearch={(kw) => void doSearch(kw)}
         onOpenSession={(cwd, id) => void openSession(cwd, id)}
         onDeleteSession={(cwd, id, title) => void deleteSession(cwd, id, title)}
+        onTogglePin={(id, pinned) => void togglePin(id, pinned)}
         onNewChat={newChat}
         onToggleSplit={toggleSplit}
         onPickFolder={() => void pickFolder()}
@@ -235,6 +304,8 @@ export function App() {
             onThinkingLevel={(l) => bridge.setThinkingLevel(l)}
             onPickFolder={() => void pickFolder()}
             onOpenSettings={() => setView("settings")}
+            commands={COMMANDS}
+            onCommand={runCommand}
           />
         ))}
       </div>

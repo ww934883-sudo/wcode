@@ -21,18 +21,43 @@ describe("createSessionDriver", () => {
     }
   });
 
-  it("jsonl：会话文件落在 projects/<hash>/ 下", async () => {
+  it("jsonl：空会话不落盘，首条 append 时 meta 与消息一起写入", async () => {
     const home = await mkdtemp(join(tmpdir(), "wcode-drv-j-"));
     try {
       const driver = await createSessionDriver({ storageType: "jsonl", cwd: "/proj", homeDir: home });
       const { sessionId, store } = await driver.createNew({ cwd: "/proj" });
       const dir = join(home, ".wcode", "projects", projectDirHash("/proj"));
+      // 懒落盘：还没发消息就没有文件
+      await expect(readFile(join(dir, `${sessionId}.jsonl`), "utf8")).rejects.toThrow();
+      await store.append({ v: 1, type: "message", message: { role: "user", content: "第一问" } });
       const raw = await readFile(join(dir, `${sessionId}.jsonl`), "utf8");
       expect(raw).toContain(`"sessionId":"${sessionId}"`);
-      expect(await store.load()).toHaveLength(1);
+      expect(raw).toContain("第一问");
+      expect(await store.load()).toHaveLength(2); // meta + 消息
       driver.close();
     } finally {
       await rm(home, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("listRecent 跳过空会话（两实现一致）", async () => {
+    for (const storageType of ["jsonl", "sqlite"] as const) {
+      const home = await mkdtemp(join(tmpdir(), `wcode-empty-${storageType}-`));
+      try {
+        const driver = await createSessionDriver({ storageType, cwd: "/proj", homeDir: home });
+        await driver.createNew({ cwd: "/proj" }); // 空会话：一条消息都没发
+        const kept = await driver.createNew({ cwd: "/proj" });
+        await kept.store.append({
+          v: 1,
+          type: "message",
+          message: { role: "user", content: "真实会话" },
+        });
+        const summaries = await driver.listRecent();
+        expect(summaries.map((s) => s.sessionId)).toEqual([kept.sessionId]);
+        driver.close();
+      } finally {
+        await rm(home, { recursive: true, force: true }).catch(() => {});
+      }
     }
   });
 
@@ -83,12 +108,18 @@ describe("createSessionDriver", () => {
         { role: "assistant", text: "旧答", toolCalls: [], usage: { inputTokens: 3, outputTokens: 4 } },
       ]);
 
-      // 幂等：二次创建 driver 不重复导入；且新会话可正常叠加
+      // 幂等：二次创建 driver 不重复导入；新会话未发消息时不产生任何痕迹
       const driver2 = await createSessionDriver({ storageType: "sqlite", cwd: "/proj", homeDir: home });
       expect(await driver2.listRecent()).toHaveLength(1);
-      await driver2.createNew({ cwd: "/proj" });
+      const fresh = await driver2.createNew({ cwd: "/proj" });
+      expect(await driver2.listRecent()).toHaveLength(1);
+      expect(await driver2.findLatest()).toBe("2026-09-15T08-00-00-000Z");
+      // 发了消息才进列表
+      await (
+        await driver2.open(fresh.sessionId)
+      ).append({ v: 1, type: "message", message: { role: "user", content: "叠加" } });
       expect(await driver2.listRecent()).toHaveLength(2);
-      expect(await driver2.findLatest()).not.toBe("2026-09-15T08-00-00-000Z");
+      expect(await driver2.findLatest()).toBe(fresh.sessionId);
       driver2.close();
 
       // 项目隔离：其他 cwd 的 driver 看不到 /proj 的会话

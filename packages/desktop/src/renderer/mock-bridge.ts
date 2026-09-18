@@ -27,6 +27,7 @@ export function createMockBridge(): WcodeBridge {
     aborted: boolean;
   }
   const sessions = new Map<string, MockSession>();
+  const mockPinned = new Set<string>();
   const evSubs = new Set<(id: string, e: AgentEvent) => void>();
   const permSubs = new Set<(a: PermissionAsk) => void>();
   const infoSubs = new Set<(i: RuntimeInfo) => void>();
@@ -72,7 +73,7 @@ export function createMockBridge(): WcodeBridge {
   seed("preview-h2", "对比 evals 基线报告");
 
   const buildInfo = (): RuntimeInfo => {
-    const byCwd = new Map<string, { id: string; title: string; time: string; messageCount: number }[]>();
+    const byCwd = new Map<string, { id: string; title: string; time: string; messageCount: number; pinned: boolean }[]>();
     for (const [id, s] of sessions) {
       const firstUser = s.messages.find((m) => m.role === "user");
       const title =
@@ -80,14 +81,15 @@ export function createMockBridge(): WcodeBridge {
           ? firstUser.content.slice(0, 40)
           : "(空会话)";
       const list = byCwd.get(s.cwd) ?? [];
-      list.push({ id, title, time: "刚刚", messageCount: s.messages.length });
+      list.push({ id, title, time: "刚刚", messageCount: s.messages.length, pinned: mockPinned.has(id) });
       byCwd.set(s.cwd, list);
     }
     const projects = [...byCwd.entries()].map(([cwd, list]) => ({
       cwd,
       label: cwd.split(/[\\/]/).pop() || cwd,
       current: cwd === CWD,
-      sessions: list,
+      // 置顶前置（稳定排序，组内保持原顺序）
+      sessions: [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned)),
     }));
     const messageCount = [...sessions.values()].reduce((n, s) => n + s.messages.length, 0);
     return {
@@ -260,6 +262,12 @@ export function createMockBridge(): WcodeBridge {
     },
     deleteSession: async (_cwd, sessionId) => {
       sessions.delete(sessionId);
+      mockPinned.delete(sessionId);
+      bump();
+    },
+    setSessionPinned: async (sessionId, pinned) => {
+      if (pinned) mockPinned.add(sessionId);
+      else mockPinned.delete(sessionId);
       bump();
     },
     searchSessions: async (keyword) => {

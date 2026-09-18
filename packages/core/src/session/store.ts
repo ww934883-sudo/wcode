@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Message } from "../types";
 import { errorMessage } from "../errors";
@@ -95,10 +95,24 @@ export class JsonlSessionStore implements SessionStore {
   constructor(
     private readonly filePath: string,
     private readonly log?: Logger,
+    /** 新建会话的懒落 meta：首条 append 时先写入，空会话不占存储 */
+    private pendingMeta?: SessionLine,
   ) {}
 
   async append(line: SessionLine): Promise<void> {
     await this.ensureDir();
+    if (this.pendingMeta) {
+      // 文件尚不存在（懒 meta：空会话首条 append / open 视图自愈）才补写 meta；
+      // 已有文件的会话 meta 必然在，跳过避免重复行
+      const exists = await stat(this.filePath).then(
+        () => true,
+        () => false,
+      );
+      if (!exists) {
+        await appendFile(this.filePath, JSON.stringify(this.pendingMeta) + "\n", "utf8");
+      }
+      this.pendingMeta = undefined;
+    }
     await appendFile(this.filePath, JSON.stringify(line) + "\n", "utf8");
   }
 
@@ -162,6 +176,8 @@ export class JsonlSessionStore implements SessionStore {
       } catch {
         continue; // 不可读文件跳过
       }
+      // 空会话（纯 meta）不进列表：没有消息的会话对 resume/展示都是噪音
+      if (messageCount === 0) continue;
       summaries.push({
         sessionId: file.replace(/\.jsonl$/, ""),
         createdAt,

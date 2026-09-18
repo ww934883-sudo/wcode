@@ -87,6 +87,11 @@ export interface SqliteStoreCtx {
   projectHash: string;
   cwd: string;
   log?: Logger;
+  /**
+   * 新建会话的懒落 meta（仅 createNew 产出的视图持有）：
+   * 首条 append 时才建 sessions 行，空会话不留痕。
+   */
+  pendingCreatedAt?: string;
 }
 
 function iso(ms: number): string {
@@ -124,6 +129,22 @@ export class SqliteSessionStore implements SessionStore {
   async append(line: SessionLine): Promise<void> {
     const { db, sessionId } = this.ctx;
     const now = this.nextTs();
+
+    // 行保险：sessions 行缺失时补建（懒 meta 的 open 视图、外部误删后的自愈）。
+    // createNew 视图持有 pendingCreatedAt，保证建行时间=创建时间；其余视图用 now。
+    const pendingAt = this.ctx.pendingCreatedAt;
+    inTransaction(db, () => {
+      db.prepare(
+        "INSERT OR IGNORE INTO sessions (id, project_hash, cwd, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        sessionId,
+        this.ctx.projectHash,
+        this.ctx.cwd,
+        pendingAt !== undefined ? Date.parse(pendingAt) || now : now,
+        now,
+      );
+    });
+    this.ctx.pendingCreatedAt = undefined;
 
     if (line.type === "meta") {
       inTransaction(db, () => {
@@ -271,7 +292,7 @@ export class SqliteSessionStore implements SessionStore {
   async listRecent(limit = 10): Promise<SessionSummary[]> {
     const rows = this.ctx.db
       .prepare(
-        "SELECT id, created_at, message_count, title FROM sessions WHERE project_hash = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+        "SELECT id, created_at, message_count, title FROM sessions WHERE project_hash = ? AND message_count > 0 ORDER BY updated_at DESC, id DESC LIMIT ?",
       )
       .all(this.ctx.projectHash, limit) as {
       id: string;

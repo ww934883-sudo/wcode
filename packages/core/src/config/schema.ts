@@ -91,6 +91,8 @@ export const configSchema = z.object({
     .default({}),
   /** lifecycle hooks（M2）：见 hooksSchema */
   hooks: hooksSchema.default({ timeoutMs: 30_000, sessionStart: [], preToolUse: [], postToolUse: [] }),
+  /** 桌面端置顶的会话 id（会话 id 全局唯一，跨项目平铺） */
+  pinnedSessions: z.array(z.string()).default([]),
   /**
    * 会话存储驱动（设计 §6）：sqlite = 单库 ~/.wcode/wcode.db（默认，要求 Node ≥ 24）；
    * jsonl = 旧目录扫描行为（老 Node / 求稳回退）。

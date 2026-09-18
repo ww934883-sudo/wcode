@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
 import path from "node:path";
 import { errorMessage } from "@wcode/core";
 import type { PermissionDecision, PermissionMode } from "@wcode/core";
@@ -42,6 +42,9 @@ function registerIpc(): void {
   );
   ipcMain.handle("wcode:deleteSession", (_e, cwd: unknown, sessionId: unknown) =>
     rt().deleteSession(String(cwd), String(sessionId)),
+  );
+  ipcMain.handle("wcode:setSessionPinned", (_e, sessionId: unknown, pinned: unknown) =>
+    rt().setSessionPinned(String(sessionId), Boolean(pinned)),
   );
   ipcMain.handle("wcode:search", (_e, keyword: unknown) => rt().search(String(keyword ?? "")));
   ipcMain.handle("wcode:send", (_e, sessionId: unknown, text: unknown) =>
@@ -145,9 +148,12 @@ function registerIpc(): void {
 }
 
 async function createWindow(): Promise<void> {
+  // 理想尺寸不超过屏幕工作区（DIP 已含系统缩放）：否则在高缩放小屏上
+  // 窗口比可视区还高，底部（含输入框）被裁在屏幕外
+  const area = screen.getPrimaryDisplay().workArea;
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
+    width: Math.min(1280, area.width),
+    height: Math.min(860, area.height),
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#f7f6fa",
