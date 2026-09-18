@@ -196,6 +196,8 @@ export interface WcodeBridge {
   searchSessions(keyword: string): Promise<SearchHitEntry[]>;
   send(sessionId: string, text: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
+  /** /compact 手动压缩：把当前会话历史摘要化（运行中拒绝） */
+  compactSession(sessionId: string): Promise<void>;
   decide(sessionId: string, askId: string, decision: PermissionDecision): Promise<void>;
   listModels(): Promise<string[]>;
   /** 供应商模型目录（SQLite provider_models 表）：按供应商分组的配置模型 */

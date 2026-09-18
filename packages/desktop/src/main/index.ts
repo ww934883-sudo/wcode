@@ -53,6 +53,9 @@ function registerIpc(): void {
   ipcMain.handle("wcode:abort", (_e, sessionId: unknown) => {
     rt().abort(String(sessionId));
   });
+  ipcMain.handle("wcode:compactSession", (_e, sessionId: unknown) =>
+    rt().compactSession(String(sessionId)),
+  );
   ipcMain.handle("wcode:decide", (_e, _sessionId: unknown, askId: unknown, decision: unknown) => {
     if (decision === "allow" || decision === "deny" || decision === "allowAlways") {
       rt().decide(String(askId), decision satisfies PermissionDecision);

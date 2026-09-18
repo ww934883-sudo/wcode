@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld("wcode", {
   searchSessions: (keyword) => ipcRenderer.invoke("wcode:search", keyword),
   send: (sessionId, text) => ipcRenderer.invoke("wcode:send", sessionId, text),
   abort: (sessionId) => ipcRenderer.invoke("wcode:abort", sessionId),
+  compactSession: (sessionId) => ipcRenderer.invoke("wcode:compactSession", sessionId),
   decide: (sessionId, askId, decision) =>
     ipcRenderer.invoke("wcode:decide", sessionId, askId, decision),
   listModels: () => ipcRenderer.invoke("wcode:listModels"),

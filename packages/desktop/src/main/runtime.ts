@@ -450,6 +450,15 @@ export class DesktopRuntime {
     this.sessions.get(sessionId)?.session.abort();
   }
 
+  /** /compact 手动压缩：跳过阈值直接把当前历史摘要回填（运行中拒绝） */
+  async compactSession(sessionId: string): Promise<void> {
+    const desk = this.sessions.get(sessionId);
+    if (!desk) throw new Error("会话未挂载或不存在");
+    if (desk.running) throw new Error("会话正在运行，请等本轮结束再压缩");
+    await desk.session.compactNow();
+    this.opts.cb.onInfo();
+  }
+
   decide(askId: string, decision: PermissionDecision): void {
     this.host.resolve(askId, decision);
   }

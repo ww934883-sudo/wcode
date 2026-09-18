@@ -198,6 +198,7 @@ export function App() {
   /** 斜杠命令表：输入 / 罗列全部，继续输入按别名/名称过滤，选中即执行 */
   const COMMANDS: ComposerCommand[] = [
     { id: "new", label: "新会话", hint: "清空当前面板", aliases: ["new", "clear"] },
+    { id: "compact", label: "压缩上下文", hint: "把当前会话历史摘要化", aliases: ["compact"] },
     { id: "split", label: "分屏开关", hint: "Ctrl+\\", aliases: ["split"] },
     { id: "theme", label: "切换深色 / 浅色主题", aliases: ["theme", "dark", "light"] },
     { id: "model", label: "模型设置", hint: "打开设置页", aliases: ["model"] },
@@ -232,6 +233,17 @@ export function App() {
         newChat();
         setNavOpen(false);
         break;
+      case "compact": {
+        const pane = panesRef.current[activePane];
+        if (!pane?.sessionId) {
+          window.alert("当前没有已开始的会话——先发送一条消息再压缩。");
+          break;
+        }
+        void bridge
+          .compactSession(pane.sessionId)
+          .catch((e) => window.alert(e instanceof Error ? e.message : String(e)));
+        break;
+      }
       case "split":
         toggleSplit();
         break;

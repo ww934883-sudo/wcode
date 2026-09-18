@@ -309,6 +309,10 @@ export function createMockBridge(): WcodeBridge {
       const s = sessions.get(sessionId);
       if (s) s.aborted = true;
     },
+    compactSession: async (sessionId) => {
+      emit(sessionId, { type: "compacted", note: "演示模式：上下文已压缩为摘要" });
+      bump();
+    },
     decide: async (_sessionId, askId, decision) => {
       const resolve = permWaiters.get(askId);
       permWaiters.delete(askId);
