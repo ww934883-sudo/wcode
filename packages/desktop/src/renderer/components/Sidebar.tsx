@@ -27,8 +27,8 @@ function SessionButton({
       >
         <svg
           viewBox="0 0 24 24"
-          width="18"
-          height="18"
+          width="20"
+          height="20"
           aria-hidden="true"
           fill={entry.pinned ? "currentColor" : "none"}
           stroke="currentColor"
@@ -56,7 +56,7 @@ function SessionButton({
           onDelete();
         }}
       >
-        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
+        <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true">
           <path
             d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"
             fill="none"
