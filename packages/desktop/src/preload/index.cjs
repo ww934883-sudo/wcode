@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("wcode", {
   send: (sessionId, text) => ipcRenderer.invoke("wcode:send", sessionId, text),
   abort: (sessionId) => ipcRenderer.invoke("wcode:abort", sessionId),
   compactSession: (sessionId) => ipcRenderer.invoke("wcode:compactSession", sessionId),
+  listProjectFiles: (cwd, query, limit) =>
+    ipcRenderer.invoke("wcode:listProjectFiles", cwd, query, limit),
   decide: (sessionId, askId, decision) =>
     ipcRenderer.invoke("wcode:decide", sessionId, askId, decision),
   listModels: () => ipcRenderer.invoke("wcode:listModels"),

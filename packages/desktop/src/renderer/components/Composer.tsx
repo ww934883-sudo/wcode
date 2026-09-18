@@ -8,6 +8,22 @@ export interface ComposerCommand {
   aliases?: string[];
 }
 
+/** $ / @ 引用面板条目：insert 为插入正文的引用 token（不含触发符） */
+export interface MentionItem {
+  kind: "skill" | "plugin" | "file";
+  name: string;
+  detail?: string;
+  insert: string;
+}
+
+export type MentionTrigger = "$" | "@";
+
+const MENTION_KIND_LABEL: Record<MentionItem["kind"], string> = {
+  skill: "技能",
+  plugin: "插件",
+  file: "文件",
+};
+
 export function Composer({
   running,
   onSend,
@@ -17,6 +33,7 @@ export function Composer({
   projectName,
   commands,
   onCommand,
+  resolveMentions,
 }: {
   running: boolean;
   onSend: (text: string) => void;
@@ -27,13 +44,17 @@ export function Composer({
   trailing?: ReactNode;
   /** 项目名：显示在输入卡上方 */
   projectName?: string;
-  /** 斜杠命令面板（提供后输入 / 唤起） */
+  /** 斜杠命令面板（行首 / 唤起） */
   commands?: ComposerCommand[];
   onCommand?: (id: string) => void;
+  /** $ / @ 引用面板（技能/插件/文件），由调用方按触发符解析候选 */
+  resolveMentions?: (trigger: MentionTrigger, query: string) => Promise<MentionItem[]>;
 }) {
   const [text, setText] = useState("");
   const [hi, setHi] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  const [caret, setCaret] = useState<number | null>(null);
+  const [mentionItems, setMentionItems] = useState<MentionItem[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -43,10 +64,40 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [text]);
 
-  // 面板激活条件：单行文本以 / 开头；/ 后文本作为过滤词（空 = 罗列全部）
+  // ── 触发器识别 ──
+  // 行首 / = 命令面板；$ / @ = 引用面板（光标前最后一个「触发符+token」，可嵌在句中）
+  const beforeCaret = text.slice(0, caret ?? text.length);
   const slashQuery =
     text.startsWith("/") && !text.includes("\n") ? text.slice(1).trim().toLowerCase() : null;
-  const matches =
+  const triggerMatch = /(?:^|[\s(\[（【])([$@])([\w\u4e00-\u9fa5./\\-]*)$/.exec(beforeCaret);
+  const trigger = (triggerMatch?.[1] ?? null) as MentionTrigger | null;
+  const mentionQuery = triggerMatch?.[2] ?? "";
+  const tokenStart =
+    triggerMatch === null ? 0 : triggerMatch.index + triggerMatch[0].length - mentionQuery.length - 1;
+
+  // 引用候选异步解析（轻防抖：连续敲字不狂发 IPC）
+  useEffect(() => {
+    if (trigger === null || !resolveMentions) {
+      setMentionItems([]);
+      return;
+    }
+    let alive = true;
+    const t = window.setTimeout(() => {
+      resolveMentions(trigger, mentionQuery)
+        .then((items) => {
+          if (alive) setMentionItems(items);
+        })
+        .catch(() => {
+          if (alive) setMentionItems([]);
+        });
+    }, 120);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [trigger, mentionQuery, resolveMentions]);
+
+  const commandMatches =
     slashQuery === null || !commands || !onCommand || dismissed
       ? []
       : commands.filter(
@@ -54,16 +105,31 @@ export function Composer({
             c.aliases?.some((a) => a.startsWith(slashQuery)) ||
             c.label.toLowerCase().includes(slashQuery),
         );
-  const paletteOpen = matches.length > 0;
+  const mentionOpen =
+    trigger !== null && !!resolveMentions && !dismissed && mentionItems.length > 0;
+  const paletteOpen = commandMatches.length > 0 || mentionOpen;
+  const popupCount = commandMatches.length > 0 ? commandMatches.length : mentionItems.length;
 
-  useEffect(() => setHi(0), [slashQuery]);
+  useEffect(() => setHi(0), [slashQuery, trigger, mentionQuery]);
   useEffect(() => setDismissed(false), [text]);
 
-  const pick = (cmd: ComposerCommand) => {
+  const pickCommand = (cmd: ComposerCommand) => {
     setText("");
     setDismissed(false);
     onCommand?.(cmd.id);
     ref.current?.focus();
+  };
+
+  const pickMention = (item: MentionItem) => {
+    const c = caret ?? text.length;
+    const next = text.slice(0, tokenStart) + item.insert + " " + text.slice(c);
+    setText(next);
+    setDismissed(false);
+    const pos = tokenStart + item.insert.length + 1;
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(pos, pos);
+    });
   };
 
   const submit = () => {
@@ -78,23 +144,40 @@ export function Composer({
       {projectName && <div className="composer-project">{projectName}</div>}
       <div className="composer-box">
         {paletteOpen && (
-          <div className="cmd-palette" role="listbox" aria-label="命令列表">
-            {matches.map((c, i) => (
-              <button
-                key={c.id}
-                type="button"
-                className={i === hi ? "cmd-item on" : "cmd-item"}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  pick(c);
-                }}
-                onMouseEnter={() => setHi(i)}
-              >
-                <span className="cmd-token">/{c.aliases?.[0] ?? c.id}</span>
-                <span className="cmd-label">{c.label}</span>
-                {c.hint && <span className="cmd-hint">{c.hint}</span>}
-              </button>
-            ))}
+          <div className="cmd-palette" role="listbox" aria-label="候选列表">
+            {commandMatches.length > 0
+              ? commandMatches.map((c, i) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={i === hi ? "cmd-item on" : "cmd-item"}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickCommand(c);
+                    }}
+                    onMouseEnter={() => setHi(i)}
+                  >
+                    <span className="cmd-token">/{c.aliases?.[0] ?? c.id}</span>
+                    <span className="cmd-label">{c.label}</span>
+                    {c.hint && <span className="cmd-hint">{c.hint}</span>}
+                  </button>
+                ))
+              : mentionItems.map((m, i) => (
+                  <button
+                    key={`${m.kind}-${m.name}`}
+                    type="button"
+                    className={i === hi ? "cmd-item on" : "cmd-item"}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickMention(m);
+                    }}
+                    onMouseEnter={() => setHi(i)}
+                  >
+                    <span className={`cmd-kind kind-${m.kind}`}>{MENTION_KIND_LABEL[m.kind]}</span>
+                    <span className="cmd-label mono">{m.name}</span>
+                    {m.detail && <span className="cmd-hint">{m.detail}</span>}
+                  </button>
+                ))}
           </div>
         )}
         <textarea
@@ -102,14 +185,17 @@ export function Composer({
           rows={1}
           value={text}
           placeholder={
-            running ? "运行中…可点击下方停止" : "输入消息，/ 唤起命令，Enter 发送，Shift+Enter 换行"
+            running
+              ? "运行中…可点击下方停止"
+              : "输入消息，/ 命令，$ 技能，@ 插件/文件，Enter 发送"
           }
           onChange={(e) => setText(e.target.value)}
+          onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart)}
           onKeyDown={(e) => {
             if (paletteOpen) {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setHi((i) => Math.min(i + 1, matches.length - 1));
+                setHi((i) => Math.min(i + 1, popupCount - 1));
                 return;
               }
               if (e.key === "ArrowUp") {
@@ -124,7 +210,11 @@ export function Composer({
               }
               if (e.key === "Enter" || e.key === "Tab") {
                 e.preventDefault();
-                pick(matches[hi] ?? matches[0]!);
+                if (commandMatches.length > 0) pickCommand(commandMatches[hi] ?? commandMatches[0]!);
+                else {
+                  const item = mentionItems[hi] ?? mentionItems[0]!;
+                  if (item) pickMention(item);
+                }
                 return;
               }
             }

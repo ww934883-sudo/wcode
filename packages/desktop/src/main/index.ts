@@ -56,6 +56,9 @@ function registerIpc(): void {
   ipcMain.handle("wcode:compactSession", (_e, sessionId: unknown) =>
     rt().compactSession(String(sessionId)),
   );
+  ipcMain.handle("wcode:listProjectFiles", (_e, cwd: unknown, query: unknown, limit: unknown) =>
+    rt().listProjectFiles(String(cwd), String(query ?? ""), Number(limit) || 20),
+  );
   ipcMain.handle("wcode:decide", (_e, _sessionId: unknown, askId: unknown, decision: unknown) => {
     if (decision === "allow" || decision === "deny" || decision === "allowAlways") {
       rt().decide(String(askId), decision satisfies PermissionDecision);

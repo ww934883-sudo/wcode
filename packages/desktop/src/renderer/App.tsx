@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PermissionDecision } from "@wcode/core";
 import type { PermissionAsk, RuntimeInfo, SearchHitEntry, ModelCatalogGroup } from "../shared/protocol";
+import type { MentionItem, MentionTrigger } from "./components/Composer";
 import { ChatPane, type PaneState } from "./components/ChatPane";
 import type { ComposerCommand } from "./components/Composer";
 import { AutomationPage } from "./components/AutomationPage";
@@ -213,8 +214,38 @@ export function App() {
     { id: "settings", label: "设置", aliases: ["settings"] },
   ];
 
-  const runCommand = (id: string) => {
-    const viewOf: Partial<Record<string, View>> = {
+  /** $ / @ 引用候选：技能走 info；插件 + 项目文件走 bridge（文件由主进程扫描 cwd） */
+  const resolveMentions = async (
+    trigger: MentionTrigger,
+    query: string,
+  ): Promise<MentionItem[]> => {
+    const q = query.trim().toLowerCase();
+    if (trigger === "$") {
+      return (info?.skills ?? [])
+        .filter(
+          (s) =>
+            q === "" ||
+            s.name.toLowerCase().includes(q) ||
+            s.description.toLowerCase().includes(q),
+        )
+        .slice(0, 12)
+        .map((s) => ({ kind: "skill" as const, name: s.name, detail: s.description, insert: s.name }));
+    }
+    const cwd = panesRef.current[activePane]?.cwd ?? info?.currentCwd ?? "";
+    const files = await bridge.listProjectFiles(cwd, q, 20).catch(() => [] as string[]);
+    const plugins = (info?.mcpServers ?? [])
+      .filter((m) => q === "" || m.name.toLowerCase().includes(q))
+      .map((m) => ({
+        kind: "plugin" as const,
+        name: m.name,
+        detail: m.connected ? "MCP 插件（已连接）" : "MCP 插件",
+        insert: m.name,
+      }));
+    const fileItems = files.map((f) => ({ kind: "file" as const, name: f, detail: "", insert: f }));
+    return [...plugins, ...fileItems];
+  };
+
+  const runCommand = (id: string) => {    const viewOf: Partial<Record<string, View>> = {
       automations: "automations",
       media: "media",
       plugins: "plugins",
@@ -327,6 +358,7 @@ export function App() {
             onOpenSettings={() => setView("settings")}
             commands={COMMANDS}
             onCommand={runCommand}
+            resolveMentions={resolveMentions}
           />
         ))}
       </div>

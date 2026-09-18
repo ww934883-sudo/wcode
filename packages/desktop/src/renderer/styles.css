@@ -789,11 +789,41 @@ button {
   text-overflow: ellipsis;
 }
 
+.cmd-kind {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.cmd-kind.kind-skill {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-weak);
+}
+
+.cmd-kind.kind-plugin {
+  color: var(--ok);
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+}
+
+.cmd-kind.kind-file {
+  color: var(--text-2);
+}
+
 .cmd-hint {
   margin-left: auto;
   font-size: 11.5px;
   color: var(--text-3);
   flex: 0 0 auto;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 模型选择器（按供应商分组）：位于底部工具栏，下拉向上弹出 */

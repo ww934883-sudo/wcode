@@ -1,7 +1,13 @@
 /** 左侧功能栏同款应用图标 */
 import brandIcon from "../assets/icon.png";
 import type { PermissionDecision } from "@wcode/core";
-import type { PermissionAsk, PermissionMode, ThinkingLevel, ModelCatalogGroup } from "../../shared/protocol";
+import type {
+  PermissionAsk,
+  PermissionMode,
+  ThinkingLevel,
+  ModelCatalogGroup,
+} from "../../shared/protocol";
+import type { MentionItem, MentionTrigger } from "./Composer";
 import type { ChatItem, UiState } from "../state";
 import { Composer, type ComposerCommand } from "./Composer";
 import { DropdownSelect } from "./DropdownSelect";
@@ -50,6 +56,7 @@ export function ChatPane({
   onOpenSettings,
   commands,
   onCommand,
+  resolveMentions,
 }: {
   pane: PaneState;
   catalog: ModelCatalogGroup[];
@@ -74,6 +81,8 @@ export function ChatPane({
   /** 斜杠命令面板（透传 Composer） */
   commands?: ComposerCommand[];
   onCommand?: (id: string) => void;
+  /** $ 技能 / @ 插件·文件 引用（透传 Composer） */
+  resolveMentions?: (trigger: MentionTrigger, query: string) => Promise<MentionItem[]>;
 }) {
   const curAsk = pane.ui.items.find(
     (it): it is Extract<ChatItem, { kind: "permission" }> =>
@@ -93,6 +102,7 @@ export function ChatPane({
       onAbort={onAbort}
       commands={commands}
       onCommand={onCommand}
+      resolveMentions={resolveMentions}
       projectName={pane.cwd.split(/[\\/]/).pop() || pane.cwd}
       toolbar={
         <>

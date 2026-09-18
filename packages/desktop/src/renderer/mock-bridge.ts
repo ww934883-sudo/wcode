@@ -313,6 +313,11 @@ export function createMockBridge(): WcodeBridge {
       emit(sessionId, { type: "compacted", note: "演示模式：上下文已压缩为摘要" });
       bump();
     },
+    listProjectFiles: async (_cwd, query) => {
+      const all = ["README.md", "src/App.tsx", "src/main.tsx", "package.json", "notes/demo.md"];
+      const q = query.trim().toLowerCase();
+      return q ? all.filter((f) => f.toLowerCase().includes(q)) : all;
+    },
     decide: async (_sessionId, askId, decision) => {
       const resolve = permWaiters.get(askId);
       permWaiters.delete(askId);

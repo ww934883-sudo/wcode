@@ -198,6 +198,8 @@ export interface WcodeBridge {
   abort(sessionId: string): Promise<void>;
   /** /compact 手动压缩：把当前会话历史摘要化（运行中拒绝） */
   compactSession(sessionId: string): Promise<void>;
+  /** @ 文件引用候选：扫项目目录（浅递归，跳过依赖/构建目录），按 query 过滤 */
+  listProjectFiles(cwd: string, query: string, limit?: number): Promise<string[]>;
   decide(sessionId: string, askId: string, decision: PermissionDecision): Promise<void>;
   listModels(): Promise<string[]>;
   /** 供应商模型目录（SQLite provider_models 表）：按供应商分组的配置模型 */

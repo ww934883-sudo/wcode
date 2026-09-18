@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import {
   AgentSession,
@@ -120,8 +121,8 @@ export class DesktopRuntime {
     if (this.mode === "real") {
       this.realProvider = this.buildRealProvider(this.model);
     }
-    await this.rebuildRegistry();
     await this.refreshDiscoveries();
+    await this.rebuildRegistry();
     if (this.mode === "demo") {
       this.currentCwd = await prepareDemoWorkspace(this.opts.userDataDir);
     }
@@ -215,7 +216,10 @@ export class DesktopRuntime {
   /** MCP：真实模式连接启用的 server；失败降级为问题清单不阻塞启动 */
   private async rebuildRegistry(): Promise<void> {
     const registry = new ToolRegistry();
-    await registry.registerSource(createBuiltinToolSource({ skills: [], agents: [] }));
+    // 注入发现的 skills/agents：skill 工具随可用技能注册（空列表不注册避免迷惑模型）
+    await registry.registerSource(
+      createBuiltinToolSource({ skills: this.skills, agents: this.agents }),
+    );
     this.mcpConnected.clear();
     this.mcpProblems = [];
     const servers = this.config?.mcpServers ?? {};
@@ -435,7 +439,8 @@ export class DesktopRuntime {
     desk.running = true;
     this.opts.cb.onInfo();
     try {
-      await desk.session.run(text);
+      // $技能 / @插件 / @文件 引用展开后随消息进入模型上下文
+      await desk.session.run(this.expandMentions(text, desk.cwd));
     } catch (err) {
       // run() 抛出即无 done 事件，补两条让渲染层复位
       this.host.emit(sessionId, { type: "error", message: errorMessage(err) });
@@ -444,6 +449,77 @@ export class DesktopRuntime {
       desk.running = false;
       this.opts.cb.onInfo();
     }
+  }
+
+  /**
+   * 引用展开：把 $技能 / @插件 / @文件 的内容以标注块附加在用户消息尾部
+   * （原文保留，渲染层气泡仍显示用户输入）。
+   * 文件引用只解析相对 cwd 且不越界的路径；不可读的 token 原样保留。
+   */
+  private expandMentions(text: string, cwd: string): string {
+    const blocks: string[] = [];
+
+    for (const name of new Set([...text.matchAll(/\$([\w-]+)/g)].map((m) => m[1]!))) {
+      const skill = this.skills.find((s) => s.name === name);
+      if (!skill) continue;
+      const body =
+        skill.body.length > 4000 ? skill.body.slice(0, 4000) + "\n…（已截断）" : skill.body;
+      blocks.push(`[用户引用了技能 $${name}，请遵循以下指令执行任务]\n${body}`);
+    }
+
+    const root = path.resolve(cwd);
+    for (const token of new Set([...text.matchAll(/@([\w./\\-]+)/g)].map((m) => m[1]!))) {
+      if (Object.keys(this.config?.mcpServers ?? {}).includes(token)) {
+        blocks.push(
+          `[用户提到了插件 @${token}：该 MCP server 的工具以 mcp__${token}__* 命名，需要时直接调用]`,
+        );
+        continue;
+      }
+      const resolved = path.resolve(root, token);
+      if (!resolved.startsWith(root + path.sep)) continue; // 防越界读盘
+      try {
+        if (!fs.statSync(resolved).isFile()) continue;
+        let content = fs.readFileSync(resolved, "utf8");
+        if (content.length > 30_000) {
+          content = content.slice(0, 30_000) + "\n…（已截断，完整内容可用 read 工具读取）";
+        }
+        blocks.push(`[用户引用的文件 @${token}]\n${content}`);
+      } catch {
+        // 不存在/不可读：token 原样保留，不展开
+      }
+    }
+
+    return blocks.length > 0 ? text + "\n\n" + blocks.join("\n\n") : text;
+  }
+
+  /** @ 文件引用候选：浅递归扫 cwd（跳过依赖/构建目录与隐藏项），按 query 过滤 */
+  async listProjectFiles(cwd: string, query: string, limit = 20): Promise<string[]> {
+    const root = path.resolve(cwd);
+    const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", ".wcode", ".next"]);
+    const out: string[] = [];
+    const walk = (dir: string, depth: number): void => {
+      if (depth > 3 || out.length >= 500) return;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (out.length >= 500) return;
+        if (e.name.startsWith(".") || skip.has(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(full, depth + 1);
+        } else {
+          out.push(path.relative(root, full).split(path.sep).join("/"));
+        }
+      }
+    };
+    walk(root, 0);
+    const q = query.trim().toLowerCase();
+    const filtered = q ? out.filter((f) => f.toLowerCase().includes(q)) : out;
+    return filtered.slice(0, limit);
   }
 
   abort(sessionId: string): void {
