@@ -399,6 +399,16 @@ export class DesktopRuntime {
     return { sessionId, messages: kept };
   }
 
+  /** 删除会话：运行中拒绝；活会话卸载，磁盘存储连消息一起清除 */
+  async deleteSession(cwd: string, sessionId: string): Promise<void> {
+    const desk = this.sessions.get(sessionId);
+    if (desk?.running) throw new Error("会话正在运行，请先停止再删除");
+    if (desk) this.sessions.delete(sessionId);
+    const driver = await this.driverFor(cwd);
+    await driver.delete(sessionId);
+    this.opts.cb.onInfo();
+  }
+
   async runTurn(sessionId: string, text: string): Promise<void> {
     const desk = this.sessions.get(sessionId);
     if (!desk || desk.running || text.trim() === "") return;

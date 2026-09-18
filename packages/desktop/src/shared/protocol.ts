@@ -175,6 +175,8 @@ export interface WcodeBridge {
     sessionId: string,
     userTurn: number,
   ): Promise<{ sessionId: string; messages: Message[] }>;
+  /** 删除会话（运行中的会话拒绝；磁盘存储连消息一起清除，不可恢复） */
+  deleteSession(cwd: string, sessionId: string): Promise<void>;
   searchSessions(keyword: string): Promise<SearchHitEntry[]>;
   send(sessionId: string, text: string): Promise<void>;
   abort(sessionId: string): Promise<void>;

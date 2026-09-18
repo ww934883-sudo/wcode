@@ -258,6 +258,10 @@ export function createMockBridge(): WcodeBridge {
       }
       return { sessionId, messages: [] };
     },
+    deleteSession: async (_cwd, sessionId) => {
+      sessions.delete(sessionId);
+      bump();
+    },
     searchSessions: async (keyword) => {
       const hits: SearchHitEntry[] = [];
       for (const [id, s] of sessions) {

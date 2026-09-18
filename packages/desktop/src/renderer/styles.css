@@ -197,6 +197,44 @@ button {
   border-radius: 8px;
   text-align: left;
   min-width: 0;
+  width: 100%;
+}
+
+/* 删除按钮悬浮在会话行右侧，hover 行时出现 */
+.session-wrap {
+  position: relative;
+  border-radius: 8px;
+}
+
+.session-wrap:hover {
+  background: var(--accent-weak);
+}
+
+.session-wrap.active {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(31, 29, 42, 0.07);
+}
+
+.session-del {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-3);
+}
+
+.session-wrap:hover .session-del {
+  display: flex;
+}
+
+.session-del:hover {
+  color: var(--danger-text);
+  background: var(--danger-bg);
 }
 
 .session:hover {
@@ -206,6 +244,11 @@ button {
 .session.active {
   background: var(--surface);
   box-shadow: 0 1px 3px rgba(31, 29, 42, 0.07);
+}
+
+.session-wrap:hover .session-title,
+.session-wrap.active .session-title {
+  padding-right: 24px;
 }
 
 .session-title {

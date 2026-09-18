@@ -40,6 +40,9 @@ function registerIpc(): void {
   ipcMain.handle("wcode:rollbackSession", (_e, cwd: unknown, sessionId: unknown, userTurn: unknown) =>
     rt().rollbackSession(String(cwd), String(sessionId), Number(userTurn) || 0),
   );
+  ipcMain.handle("wcode:deleteSession", (_e, cwd: unknown, sessionId: unknown) =>
+    rt().deleteSession(String(cwd), String(sessionId)),
+  );
   ipcMain.handle("wcode:search", (_e, keyword: unknown) => rt().search(String(keyword ?? "")));
   ipcMain.handle("wcode:send", (_e, sessionId: unknown, text: unknown) =>
     rt().runTurn(String(sessionId), String(text ?? "")),

@@ -128,6 +128,27 @@ export function App() {
     setSearchResults(null);
   };
 
+  /** 删除会话：确认后删存储，引用它的分屏面板一并回到新会话态 */
+  const deleteSession = async (cwd: string, sessionId: string, title: string) => {
+    if (!window.confirm(`删除会话「${title}」？消息记录将从磁盘清除，不可恢复。`)) {
+      return;
+    }
+    try {
+      await bridge.deleteSession(cwd, sessionId);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setPanes((ps) =>
+      ps.map((p) =>
+        p.sessionId === sessionId
+          ? { sessionId: null, cwd: p.cwd, ui: emptyUiState }
+          : p,
+      ),
+    );
+    setSearchResults(null);
+  };
+
   const doSearch = async (keyword: string) => {
     if (keyword === "") {
       setSearchResults(null);
@@ -185,6 +206,7 @@ export function App() {
         split={panes.length > 1}
         onSearch={(kw) => void doSearch(kw)}
         onOpenSession={(cwd, id) => void openSession(cwd, id)}
+        onDeleteSession={(cwd, id, title) => void deleteSession(cwd, id, title)}
         onNewChat={newChat}
         onToggleSplit={toggleSplit}
         onPickFolder={() => void pickFolder()}

@@ -113,4 +113,55 @@ describe("createSessionDriver", () => {
       await rm(home, { recursive: true, force: true }).catch(() => {});
     }
   });
+
+  it("delete：两实现一致——目标会话消失、其余会话完好、重复删除幂等", async () => {
+    for (const storageType of ["jsonl", "sqlite"] as const) {
+      const home = await mkdtemp(join(tmpdir(), `wcode-del-${storageType}-`));
+      try {
+        const driver = await createSessionDriver({ storageType, cwd: "/proj", homeDir: home });
+        const a = await driver.createNew({ cwd: "/proj" });
+        await a.store.append({
+          v: 1,
+          type: "message",
+          message: { role: "user", content: "要删除的会话" },
+        });
+        await a.store.append({
+          v: 1,
+          type: "message",
+          message: { role: "assistant", text: "答", toolCalls: [], usage: { inputTokens: 5, outputTokens: 6 } },
+        });
+        const b = await driver.createNew({ cwd: "/proj" });
+        await b.store.append({
+          v: 1,
+          type: "message",
+          message: { role: "user", content: "要保留的会话" },
+        });
+
+        await driver.delete(a.sessionId);
+        // 再删一次：幂等不抛错
+        await driver.delete(a.sessionId);
+
+        const summaries = await driver.listRecent();
+        expect(summaries.map((s) => s.sessionId)).toEqual([b.sessionId]);
+        // 被删会话打开即空（meta 也没了）
+        expect(await (await driver.open(a.sessionId)).load()).toEqual([]);
+        // 保留会话完好
+        expect(await (await driver.open(b.sessionId)).load()).toHaveLength(2);
+        expect(await driver.stats()).toMatchObject({ sessionCount: 1, messageCount: 1 });
+        if (storageType === "jsonl") {
+          const file = join(
+            home,
+            ".wcode",
+            "projects",
+            projectDirHash("/proj"),
+            `${a.sessionId}.jsonl`,
+          );
+          await expect(readFile(file, "utf8")).rejects.toThrow();
+        }
+        driver.close();
+      } finally {
+        await rm(home, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  });
 });

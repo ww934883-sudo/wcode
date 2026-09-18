@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "../logging/port";
@@ -32,6 +32,8 @@ export interface SessionDriver {
   search(keyword: string, limit?: number): Promise<SessionSearchHit[]>;
   /** 用量统计（W-b /stats）：本项目聚合 */
   stats(): Promise<SessionStats>;
+  /** 删除会话（连消息/事件一起）；会话不存在时静默成功（幂等） */
+  delete(sessionId: string): Promise<void>;
   /** 释放底层资源（sqlite 关连接并做 WAL 检查点；jsonl 无操作） */
   close(): void;
 }
@@ -66,6 +68,14 @@ export async function createSessionDriver(
       findLatest: () => index.findLatest(),
       search: (keyword, limit) => index.search(keyword, limit),
       stats: () => index.stats(),
+      delete: async (sessionId) => {
+        // messages/events 外键 ON DELETE CASCADE，删 sessions 行即全量清理；
+        // project_hash 限定防止串项目误删
+        db.prepare("DELETE FROM sessions WHERE id = ? AND project_hash = ?").run(
+          sessionId,
+          projectHash,
+        );
+      },
       open: async (sessionId) =>
         new SqliteSessionStore({ db, sessionId, projectHash, cwd: opts.cwd, log }),
       createNew: async (init) => {
@@ -90,11 +100,15 @@ export async function createSessionDriver(
   // 发现视图：只用于 listRecent/findLatest（按 dirname 扫描），从不 append/load
   const index = new JsonlSessionStore(jsonlSessionPath(sessionsDir, "index-probe"), log);
   return {
-    listRecent: (limit) => index.listRecent(limit),
-    findLatest: () => index.findLatest(),
-    search: (keyword, limit) => index.search(keyword, limit),
-    stats: () => index.stats(),
-    open: async (sessionId) => new JsonlSessionStore(jsonlSessionPath(sessionsDir, sessionId), log),
+      listRecent: (limit) => index.listRecent(limit),
+      findLatest: () => index.findLatest(),
+      search: (keyword, limit) => index.search(keyword, limit),
+      stats: () => index.stats(),
+      delete: async (sessionId) => {
+        // jsonlSessionPath 自带 id 白名单校验（防路径穿越）；文件不存在视为已删
+        await rm(jsonlSessionPath(sessionsDir, sessionId), { force: true });
+      },
+      open: async (sessionId) => new JsonlSessionStore(jsonlSessionPath(sessionsDir, sessionId), log),
     createNew: async (init) => {
       const sessionId = newSessionId();
       const store = new JsonlSessionStore(jsonlSessionPath(sessionsDir, sessionId), log);

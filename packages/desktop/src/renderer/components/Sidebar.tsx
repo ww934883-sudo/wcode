@@ -5,30 +5,55 @@ function SessionButton({
   entry,
   active,
   onClick,
+  onDelete,
 }: {
   entry: { id: string; title: string; time: string; messageCount: number };
   active: boolean;
   onClick: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <button className={active ? "session active" : "session"} onClick={onClick}>
-      <span className="session-title">{entry.title}</span>
-      <span className="session-meta">
-        {entry.time && <span className="session-time">{entry.time}</span>}
-        {entry.messageCount > 0 && <span className="session-count">{entry.messageCount}条</span>}
-      </span>
-    </button>
+    <div className={active ? "session-wrap active" : "session-wrap"}>
+      <button className={active ? "session active" : "session"} onClick={onClick}>
+        <span className="session-title">{entry.title}</span>
+        <span className="session-meta">
+          {entry.time && <span className="session-time">{entry.time}</span>}
+          {entry.messageCount > 0 && <span className="session-count">{entry.messageCount}条</span>}
+        </span>
+      </button>
+      <button
+        className="session-del"
+        title="删除会话"
+        aria-label={`删除会话 ${entry.title}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <path
+            d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+    </div>
   );
 }
 
 function ProjectGroup({
   project,
   onOpenSession,
+  onDeleteSession,
   activeId,
   onPickFolder,
 }: {
   project: ProjectEntry;
   onOpenSession: (cwd: string, sessionId: string) => void;
+  onDeleteSession: (cwd: string, sessionId: string, title: string) => void;
   activeId: string | null;
   onPickFolder: () => void;
 }) {
@@ -54,6 +79,7 @@ function ProjectGroup({
               entry={s}
               active={s.id === activeId}
               onClick={() => onOpenSession(project.cwd, s.id)}
+              onDelete={() => onDeleteSession(project.cwd, s.id, s.title)}
             />
           ))
         )}
@@ -70,6 +96,7 @@ export function Sidebar({
   split,
   onSearch,
   onOpenSession,
+  onDeleteSession,
   onNewChat,
   onToggleSplit,
   onPickFolder,
@@ -80,6 +107,7 @@ export function Sidebar({
   split: boolean;
   onSearch: (keyword: string) => void;
   onOpenSession: (cwd: string, sessionId: string) => void;
+  onDeleteSession: (cwd: string, sessionId: string, title: string) => void;
   onNewChat: () => void;
   onToggleSplit: () => void;
   onPickFolder: () => void;
@@ -182,6 +210,7 @@ export function Sidebar({
               key={p.cwd}
               project={p}
               onOpenSession={onOpenSession}
+              onDeleteSession={onDeleteSession}
               activeId={activeSessionId}
               onPickFolder={onPickFolder}
             />
