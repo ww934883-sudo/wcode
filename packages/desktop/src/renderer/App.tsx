@@ -364,15 +364,15 @@ export function App() {
                 if (g.provider === info?.providerName) return true; // 当前使用中的始终展示
                 return info?.providers.find((x) => x.name === g.provider)?.enabled !== false;
               })}
-              onAddProvider={(name, opts) => void bridge.addProvider(name, opts)}
+              onAddProvider={(name, opts) => bridge.addProvider(name, opts)}
               onRemoveProvider={(name) => void bridge.removeProvider(name)}
               onUpdateProvider={(name, patch) => void bridge.updateProvider(name, patch)}
               onRenameProvider={(o, n) => void bridge.renameProvider(o, n)}
               onSetEnabled={(name, enabled) => void bridge.setProviderEnabled(name, enabled)}
               onSetActive={(name) => void bridge.setActiveProvider(name)}
-              onSaveKey={(name, key) => void bridge.saveProviderKey(name, key)}
+              onSaveKey={(name, key) => bridge.saveProviderKey(name, key)}
               onTestModel={(p, m) => bridge.testModel(p, m)}
-              onAddModel={(p, m, c) => void bridge.addCatalogModel(p, m, c)}
+              onAddModel={(p, m, c) => bridge.addCatalogModel(p, m, c)}
               onRemoveModel={(p, m) => void bridge.removeCatalogModel(p, m)}
               onUpdateModel={(p, m, patch) => void bridge.updateCatalogModel(p, m, patch)}
             />

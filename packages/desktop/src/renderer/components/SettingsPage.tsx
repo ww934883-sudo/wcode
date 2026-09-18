@@ -36,15 +36,15 @@ export function SettingsPage({
 }: {
   info: RuntimeInfo | null;
   catalog: ModelCatalogGroup[];
-  onAddProvider: (name: string, opts: { type: string; baseUrl: string }) => void;
+  onAddProvider: (name: string, opts: { type: string; baseUrl: string }) => Promise<void>;
   onRemoveProvider: (name: string) => void;
   onUpdateProvider: (name: string, patch: { baseUrl?: string; type?: string }) => void;
   onRenameProvider: (oldName: string, newName: string) => void;
   onSetEnabled: (name: string, enabled: boolean) => void;
   onSetActive: (name: string) => void;
-  onSaveKey: (name: string, key: string) => void;
+  onSaveKey: (name: string, key: string) => Promise<void>;
   onTestModel: (provider: string, model: string) => Promise<{ ok: boolean; latencyMs: number; sample?: string; error?: string }>;
-  onAddModel: (provider: string, model: string, contextLabel?: string) => void;
+  onAddModel: (provider: string, model: string, contextLabel?: string) => Promise<void>;
   onRemoveModel: (provider: string, model: string) => void;
   onUpdateModel: (provider: string, model: string, patch: { model?: string; contextLabel?: string | null }) => void;
 }) {
@@ -59,6 +59,9 @@ export function SettingsPage({
   const [err, setErr] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [addDraft, setAddDraft] = useState({ name: "", type: "openai-compatible", baseUrl: "" });
+  const [addKey, setAddKey] = useState("");
+  const [addModels, setAddModels] = useState<{ model: string; contextLabel: string }[]>([]);
+  const [addModelDraft, setAddModelDraft] = useState({ model: "", contextLabel: "" });
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [urlDraft, setUrlDraft] = useState("");
@@ -175,6 +178,91 @@ export function SettingsPage({
                     />
                   </div>
                 </label>
+                <label className="field">
+                  <span>API Key（可留空，之后在详情里录入）</span>
+                  <div className="field-row">
+                    <input
+                      type={keyVisible ? "text" : "password"}
+                      placeholder="sk-…"
+                      value={addKey}
+                      onChange={(e) => setAddKey(e.target.value)}
+                    />
+                    <button
+                      className="icon-btn"
+                      title={keyVisible ? "隐藏" : "显示"}
+                      onClick={() => setKeyVisible((v) => !v)}
+                    >
+                      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        {keyVisible ? (
+                          <>
+                            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </>
+                        ) : (
+                          <>
+                            <path d="M2 12s3.5-7 10-7c2 0 3.7.6 5.2 1.5M22 12s-3.5 7-10 7c-2 0-3.7-.6-5.2-1.5" />
+                            <path d="M4 20L20 4" />
+                          </>
+                        )}
+                      </svg>
+                    </button>
+                  </div>
+                </label>
+              </div>
+              <div className="settings-models">
+                <div className="settings-models-title">模型列表（{addModels.length}）</div>
+                {addModels.map((m, idx) => (
+                  <div key={`${m.model}-${idx}`} className="model-row">
+                    <span className="mono">{m.model}</span>
+                    {m.contextLabel && <span className="ctx-chip">{m.contextLabel}</span>}
+                    <span className="model-row-actions" style={{ display: "flex" }}>
+                      <button
+                        className="icon-btn danger"
+                        title="移除"
+                        onClick={() => setAddModels((list) => list.filter((_, i) => i !== idx))}
+                      >
+                        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                          <path
+                            d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.3"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </button>
+                    </span>
+                  </div>
+                ))}
+                <div className="model-add-row">
+                  <input
+                    placeholder="模型 id（如 kimi-for-coding）"
+                    value={addModelDraft.model}
+                    onChange={(e) => setAddModelDraft((d) => ({ ...d, model: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && addModelDraft.model.trim() !== "") {
+                        setAddModels((l) => [...l, { model: addModelDraft.model.trim(), contextLabel: addModelDraft.contextLabel.trim() }]);
+                        setAddModelDraft({ model: "", contextLabel: "" });
+                      }
+                    }}
+                  />
+                  <input
+                    className="ctx-input"
+                    placeholder="上下文（可空，如 1M）"
+                    value={addModelDraft.contextLabel}
+                    onChange={(e) => setAddModelDraft((d) => ({ ...d, contextLabel: e.target.value }))}
+                  />
+                  <button
+                    className="btn"
+                    disabled={addModelDraft.model.trim() === ""}
+                    onClick={() => {
+                      setAddModels((l) => [...l, { model: addModelDraft.model.trim(), contextLabel: addModelDraft.contextLabel.trim() }]);
+                      setAddModelDraft({ model: "", contextLabel: "" });
+                    }}
+                  >
+                    ＋ 添加
+                  </button>
+                </div>
               </div>
               <div className="settings-create-actions">
                 <button
@@ -182,13 +270,19 @@ export function SettingsPage({
                   disabled={addDraft.name.trim() === ""}
                   onClick={() =>
                     void run(async () => {
-                      await onAddProvider(addDraft.name.trim(), {
-                        type: addDraft.type,
-                        baseUrl: addDraft.baseUrl,
-                      });
-                      setSelectedName(addDraft.name.trim());
+                      const name = addDraft.name.trim();
+                      // 依次落盘：供应商 → key → 模型目录（一步失败则停止并提示）
+                      await onAddProvider(name, { type: addDraft.type, baseUrl: addDraft.baseUrl });
+                      if (addKey.trim() !== "") await onSaveKey(name, addKey.trim());
+                      for (const m of addModels) {
+                        await onAddModel(name, m.model.trim(), m.contextLabel.trim() || undefined);
+                      }
+                      setSelectedName(name);
                       setShowAdd(false);
                       setAddDraft({ name: "", type: "openai-compatible", baseUrl: "" });
+                      setAddKey("");
+                      setAddModels([]);
+                      setAddModelDraft({ model: "", contextLabel: "" });
                     })
                   }
                 >
