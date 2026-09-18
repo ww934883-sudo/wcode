@@ -87,6 +87,19 @@ export function App() {
   const mutatePane = (idx: number, fn: (p: PaneState) => PaneState) =>
     setPanes((ps) => ps.map((p, i) => (i === idx ? fn(p) : p)));
 
+  /** 面板内联提示（替代 window.alert：原生弹窗会阻塞渲染进程且可能不可见） */
+  const pushNotice = (idx: number, level: "info" | "error", msg: string) =>
+    mutatePane(idx, (p) => ({
+      ...p,
+      ui: {
+        ...p.ui,
+        items: [
+          ...p.ui.items,
+          { kind: "notice" as const, id: `notice-${level}-${p.ui.items.length}`, level, text: msg },
+        ],
+      },
+    }));
+
   const send = async (idx: number, text: string) => {
     const pane = panesRef.current[idx];
     if (!pane) return;
@@ -155,7 +168,7 @@ export function App() {
     try {
       await bridge.deleteSession(cwd, sessionId);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e));
+      pushNotice(activePane, "error", e instanceof Error ? e.message : String(e));
       return;
     }
     setPanes((ps) =>
@@ -266,13 +279,20 @@ export function App() {
         break;
       case "compact": {
         const pane = panesRef.current[activePane];
-        if (!pane?.sessionId) {
-          window.alert("当前没有已开始的会话——先发送一条消息再压缩。");
+        if (!pane) break;
+        if (!pane.sessionId) {
+          pushNotice(activePane, "info", "当前会话还没有消息，无需压缩。");
           break;
         }
         void bridge
           .compactSession(pane.sessionId)
-          .catch((e) => window.alert(e instanceof Error ? e.message : String(e)));
+          .catch((e) =>
+            pushNotice(
+              activePane,
+              "error",
+              e instanceof Error ? e.message : String(e),
+            ),
+          );
         break;
       }
       case "split":

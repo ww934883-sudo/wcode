@@ -371,7 +371,10 @@ export class AgentSession {
   /** /compact 手动压缩：跳过阈值判断，直接对当前历史做摘要回填 */
   async compactNow(): Promise<string> {
     if (this.state.messages.length === 0) {
-      return "当前没有历史消息，无需压缩。";
+      // 空会话也发事件：各端（CLI/桌面）都能看到提示，而不是静默返回
+      const note = "当前没有历史消息，无需压缩。";
+      this.host.emit({ type: "compacted", note });
+      return note;
     }
     return await this.rebuildWithSummary();
   }
