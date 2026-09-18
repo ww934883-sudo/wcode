@@ -197,13 +197,21 @@ button {
   border-radius: 8px;
   text-align: left;
   min-width: 0;
-  width: 100%;
+  flex: 1;
 }
 
-/* 删除按钮悬浮在会话行右侧，hover 行时出现 */
+/* 会话行：图钉在文字左侧（间隔一个空格宽），删除在右侧 */
 .session-wrap {
-  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
   border-radius: 8px;
+  padding-left: 6px;
+}
+
+/* 图钉出现时文字整体右移；静止态 padding-left 6+4=10px 与原来对齐 */
+.session-wrap .session {
+  padding-left: 4px;
 }
 
 .session-wrap:hover {
@@ -215,19 +223,13 @@ button {
   box-shadow: 0 1px 3px rgba(31, 29, 42, 0.07);
 }
 
-/* 悬浮操作按钮（置顶/删除）：hover 行时出现，置顶态仅图钉常显 */
-.session-actions {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  display: flex;
-  gap: 2px;
-}
-
+/* 悬浮操作按钮：hover 行时出现，置顶态仅图钉常显 */
 .session-ico {
   display: none;
-  width: 24px;
-  height: 24px;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  margin-top: 5px;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
@@ -246,20 +248,6 @@ button {
 
 .session-ico.on {
   color: var(--accent);
-}
-
-.session:hover {
-  background: var(--accent-weak);
-}
-
-.session.active {
-  background: var(--surface);
-  box-shadow: 0 1px 3px rgba(31, 29, 42, 0.07);
-}
-
-.session-wrap:hover .session-title,
-.session-wrap.active .session-title {
-  padding-right: 24px;
 }
 
 .session-title {
