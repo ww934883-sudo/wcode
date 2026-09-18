@@ -346,6 +346,22 @@ export function App() {
         </button>
       ) : (
         <div className="content">
+          {/* 非会话页统一顶栏：显式返回入口（Rail 的会话图标之外） */}
+          <div className="page-top">
+            <button className="page-back" title="返回会话" onClick={() => setView("chat")}>
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path
+                  d="M14.5 5l-7 7 7 7"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              返回会话
+            </button>
+          </div>
           {view === "plugins" && (
             <PluginsPage
               info={info}
