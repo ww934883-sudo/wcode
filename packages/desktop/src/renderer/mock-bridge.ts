@@ -35,6 +35,11 @@ export function createMockBridge(): WcodeBridge {
   let seq = 0;
   let permSeq = 0;
   let model = DEMO_MODELS[0] ?? "wcode-demo";
+  let activeProvider = "anthropic";
+  const mockCatalog = new Map<string, Set<string>>([
+    ["anthropic", new Set(["claude-sonnet-4-6"])],
+    ["zhipu", new Set(["glm-5.3-flash", "deepseek-v3"])],
+  ]);
   let contextTokens = 200_000;
   let permissionMode: PermissionMode = "default";
   let thinkingLevel: ThinkingLevel = "medium";
@@ -116,8 +121,8 @@ export function createMockBridge(): WcodeBridge {
         connected: mcpConnected,
       })),
       providers: [
-        { name: "anthropic", type: "anthropic", hasKey: false, active: true },
-        { name: "zhipu", type: "openai-compatible", hasKey: true, active: false },
+        { name: "anthropic", type: "anthropic", hasKey: false, active: activeProvider === "anthropic" },
+        { name: "zhipu", type: "openai-compatible", hasKey: true, active: activeProvider === "zhipu" },
       ],
       stats: { sessionCount: sessions.size, messageCount, inputTokens: 4523, outputTokens: 921 },
       notice,
@@ -303,6 +308,25 @@ export function createMockBridge(): WcodeBridge {
       resolve?.(decision);
     },
     listModels: async () => DEMO_MODELS,
+    listModelCatalog: async () =>
+      [...mockCatalog.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([provider, models]) => ({ provider, models: [...models] })),
+    addCatalogModel: async (provider, m) => {
+      const list = mockCatalog.get(provider) ?? new Set<string>();
+      list.add(m);
+      mockCatalog.set(provider, list);
+      bump();
+    },
+    removeCatalogModel: async (provider, m) => {
+      mockCatalog.get(provider)?.delete(m);
+      bump();
+    },
+    selectModel: async (provider, m) => {
+      activeProvider = provider;
+      model = m;
+      bump();
+    },
     setModel: async (m) => {
       model = m;
       bump();

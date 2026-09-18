@@ -1,7 +1,8 @@
-import type { AgentEvent, Message, PermissionDecision, ThinkingLevel } from "@wcode/core";
+import type { AgentEvent, Message, ModelCatalogGroup, PermissionDecision, ThinkingLevel } from "@wcode/core";
 
 // 思考级别类型以 core 的 ModelRequest.thinking 为准（provider 映射的单一事实源）
 export type { ThinkingLevel };
+export type { ModelCatalogGroup };
 
 export type PermissionMode = "plan" | "default" | "acceptEdits" | "bypass";
 
@@ -186,6 +187,12 @@ export interface WcodeBridge {
   abort(sessionId: string): Promise<void>;
   decide(sessionId: string, askId: string, decision: PermissionDecision): Promise<void>;
   listModels(): Promise<string[]>;
+  /** 供应商模型目录（SQLite provider_models 表）：按供应商分组的配置模型 */
+  listModelCatalog(): Promise<ModelCatalogGroup[]>;
+  addCatalogModel(provider: string, model: string): Promise<void>;
+  removeCatalogModel(provider: string, model: string): Promise<void>;
+  /** 选择模型 = 供应商 + 模型一起切（写配置持久化，空闲会话热切换） */
+  selectModel(provider: string, model: string): Promise<void>;
   /** 以下三项对新会话生效（模型选择即时热切活会话） */
   setModel(model: string): Promise<void>;
   setContextTokens(tokens: number): Promise<void>;

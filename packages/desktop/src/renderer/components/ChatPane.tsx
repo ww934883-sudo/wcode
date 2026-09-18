@@ -1,9 +1,10 @@
 /** 左侧功能栏同款应用图标 */
 import brandIcon from "../assets/icon.png";
 import type { PermissionDecision } from "@wcode/core";
-import type { PermissionAsk, PermissionMode, ThinkingLevel } from "../../shared/protocol";
+import type { PermissionAsk, PermissionMode, ThinkingLevel, ModelCatalogGroup } from "../../shared/protocol";
 import type { ChatItem, UiState } from "../state";
 import { Composer, type ComposerCommand } from "./Composer";
+import { ModelSelect } from "./ModelSelect";
 import { ChatView } from "./ChatView";
 
 export interface PaneState {
@@ -29,7 +30,8 @@ const THINKING_OPTIONS: { value: ThinkingLevel; label: string }[] = [
 /** 单个聊天面板：空状态=居中欢迎页（问候+输入卡+引导卡），有消息=会话流+底部输入卡 */
 export function ChatPane({
   pane,
-  models,
+  catalog,
+  providerName,
   model,
   permissionMode,
   thinkingLevel,
@@ -49,7 +51,9 @@ export function ChatPane({
   onCommand,
 }: {
   pane: PaneState;
-  models: string[];
+  catalog: ModelCatalogGroup[];
+  /** 当前激活供应商（分组下拉按它定位） */
+  providerName: string;
   model: string;
   permissionMode: PermissionMode;
   thinkingLevel: ThinkingLevel;
@@ -61,7 +65,7 @@ export function ChatPane({
   onDecide: (askId: string, decision: PermissionDecision) => void;
   onFork: (userTurn: number) => void;
   onRollback: (userTurn: number) => void;
-  onModel: (m: string) => void;
+  onModel: (provider: string, model: string) => void;
   onPermissionMode: (m: PermissionMode) => void;
   onThinkingLevel: (l: ThinkingLevel) => void;
   onPickFolder: () => void;
@@ -103,45 +107,29 @@ export function ChatPane({
               </option>
             ))}
           </select>
-          <div className="pane-toolbar">
-            <select
-              className="sel"
-              value={model}
-              title="模型（即时切换，空闲会话生效）"
-              onChange={(e) => onModel(e.target.value)}
-            >
-              {/* 配置中的模型 id 可能带日期后缀差异（如 glm-5.3-flash vs
-                  glm-5-3-flash-260828）：不在列表时补在首位，
-                  保证下拉定位到当前模型而不是空选中态 */}
-              {(models.length > 0
-                ? models.includes(model)
-                  ? models
-                  : [model, ...models]
-                : [model]
-              ).map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            <select
-              className="sel"
-              value={thinkingLevel}
-              title="思考级别（下一轮请求生效）"
-              onChange={(e) => onThinkingLevel(e.target.value as ThinkingLevel)}
-            >
-              {THINKING_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            {pane.ui.usage && (
-              <span className="usage">
-                ↑{pane.ui.usage.inputTokens} ↓{pane.ui.usage.outputTokens}
-              </span>
-            )}
-          </div>
+          <ModelSelect
+            catalog={catalog}
+            provider={providerName}
+            model={model}
+            onSelect={onModel}
+          />
+          <select
+            className="sel"
+            value={thinkingLevel}
+            title="思考级别（下一轮请求生效）"
+            onChange={(e) => onThinkingLevel(e.target.value as ThinkingLevel)}
+          >
+            {THINKING_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {pane.ui.usage && (
+            <span className="usage">
+              ↑{pane.ui.usage.inputTokens} ↓{pane.ui.usage.outputTokens}
+            </span>
+          )}
         </>
       }
     />

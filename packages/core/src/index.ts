@@ -40,3 +40,4 @@ export * from "./hooks/hooks";
 export * from "./util/frontmatter";
 export * from "./config/schema";
 export * from "./config/loader";
+export * from "./config/model-catalog";

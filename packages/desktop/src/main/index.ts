@@ -59,6 +59,16 @@ function registerIpc(): void {
     }
   });
   ipcMain.handle("wcode:listModels", () => rt().listModels());
+  ipcMain.handle("wcode:listModelCatalog", () => rt().listModelCatalog());
+  ipcMain.handle("wcode:addCatalogModel", (_e, p: unknown, m: unknown) =>
+    rt().addCatalogModel(String(p), String(m)),
+  );
+  ipcMain.handle("wcode:removeCatalogModel", (_e, p: unknown, m: unknown) =>
+    rt().removeCatalogModel(String(p), String(m)),
+  );
+  ipcMain.handle("wcode:selectModel", (_e, p: unknown, m: unknown) =>
+    rt().selectModel(String(p), String(m)),
+  );
   ipcMain.handle("wcode:setModel", (_e, model: unknown) => {
     rt().setModel(String(model));
   });

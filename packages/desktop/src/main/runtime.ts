@@ -14,6 +14,7 @@ import {
   errorMessage,
   loadConfig,
   messagesFromSessionLines,
+  ModelCatalogStore,
   parseRuleString,
   type AgentEvent,
   type AgentHost,
@@ -31,7 +32,7 @@ import {
 } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
 import { OpenAIChatProvider, OpenAIResponsesProvider } from "@wcode/provider-openai";
-import type { PermissionMode, RuntimeInfo, SearchHitEntry, SessionEntry, ThinkingLevel } from "../shared/protocol";
+import type { PermissionMode, RuntimeInfo, SearchHitEntry, SessionEntry, ThinkingLevel, ModelCatalogGroup } from "../shared/protocol";
 import type { AutomationDeps } from "./automation";
 import { AutomationDesk } from "./automation";
 import { buildDemoTurns, ScriptedProvider } from "./demo-script";
@@ -82,6 +83,7 @@ export class DesktopRuntime {
   private skills: SkillDefinition[] = [];
   private readonly homeDir: string;
   private automationDesk: AutomationDesk | null = null;
+  private catalog: ModelCatalogStore | null = null;
 
   constructor(
     private readonly host: {
@@ -126,6 +128,12 @@ export class DesktopRuntime {
     // 自动化调度台：主进程内置 tick，与 CLI daemon 共库（claim 互斥防双跑）
     this.automationDesk = new AutomationDesk(this.automationDeps());
     this.automationDesk.start();
+    // 模型目录种子：把当前（供应商, 模型）补入 provider_models，保证选择器首项可用
+    await this.catalogFor()
+      .then((c) => c.add(this.activeProviderName(), this.model))
+      .catch((err) => {
+        this.notice = `模型目录初始化失败（${errorMessage(err)}）`;
+      });
   }
 
   /** 应用退出时释放：停调度器并关闭 SQLite 连接（WAL 检查点） */
@@ -472,6 +480,42 @@ export class DesktopRuntime {
       // 网关不支持列表时降级为当前模型
     }
     return this.config?.model ? [this.config.model] : [];
+  }
+
+  /** 模型目录（惰性打开；与 sessions/automations 共用 ~/.wcode/wcode.db 连接缓存） */
+  private catalogFor(): Promise<ModelCatalogStore> {
+    if (!this.catalog) {
+      return ModelCatalogStore.open(path.join(this.homeDir, ".wcode", "wcode.db")).then((c) => {
+        this.catalog = c;
+        return c;
+      });
+    }
+    return Promise.resolve(this.catalog);
+  }
+
+  async listModelCatalog(): Promise<ModelCatalogGroup[]> {
+    return this.catalogFor().then((c) => c.list());
+  }
+
+  async addCatalogModel(provider: string, model: string): Promise<void> {
+    (await this.catalogFor()).add(provider, model);
+    this.opts.cb.onInfo();
+  }
+
+  async removeCatalogModel(provider: string, model: string): Promise<void> {
+    (await this.catalogFor()).remove(provider, model);
+    this.opts.cb.onInfo();
+  }
+
+  /** 选择模型 = 供应商 + 模型一起切；两者都写回 settings.json 持久化 */
+  async selectModel(provider: string, model: string): Promise<void> {
+    if (provider !== this.activeProviderName()) {
+      await this.setActiveProvider(provider);
+    }
+    this.setModel(model);
+    await patchUserSettings((obj) => {
+      obj.model = model;
+    }, this.homeDir);
   }
 
   /** 模型热切：真实模式重建 provider 并换入空闲会话（运行中的会话保持不动） */

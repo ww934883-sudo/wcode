@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PermissionDecision } from "@wcode/core";
-import type { PermissionAsk, RuntimeInfo, SearchHitEntry } from "../shared/protocol";
+import type { PermissionAsk, RuntimeInfo, SearchHitEntry, ModelCatalogGroup } from "../shared/protocol";
 import { ChatPane, type PaneState } from "./components/ChatPane";
 import type { ComposerCommand } from "./components/Composer";
 import { AutomationPage } from "./components/AutomationPage";
@@ -30,7 +30,7 @@ export function App() {
   const [view, setView] = useState<View>("chat");
   const [panes, setPanes] = useState<PaneState[]>([]);
   const [activePane, setActivePane] = useState(0);
-  const [models, setModels] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<ModelCatalogGroup[]>([]);
   const [navOpen, setNavOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchHitEntry[] | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
@@ -71,8 +71,16 @@ export function App() {
   useEffect(() => {
     if (info && panesRef.current.length === 0) {
       setPanes([{ sessionId: null, cwd: info.currentCwd, ui: emptyUiState }]);
-      void bridge.listModels().then(setModels);
     }
+  }, [info, bridge]);
+
+  // 模型目录：info 每次推送后刷新（增删模型/切换都会触发）
+  useEffect(() => {
+    if (!info) return;
+    bridge
+      .listModelCatalog()
+      .then(setCatalog)
+      .catch(() => {});
   }, [info, bridge]);
 
   const mutatePane = (idx: number, fn: (p: PaneState) => PaneState) =>
@@ -285,7 +293,8 @@ export function App() {
           <ChatPane
             key={idx}
             pane={pane}
-            models={models}
+            catalog={catalog}
+            providerName={info?.providerName ?? ""}
             model={info?.model ?? ""}
             permissionMode={info?.permissionMode ?? "default"}
             thinkingLevel={info?.thinkingLevel ?? "medium"}
@@ -299,7 +308,7 @@ export function App() {
             }}
             onFork={(turn) => void fork(idx, turn)}
             onRollback={(turn) => void rollback(idx, turn)}
-            onModel={(m) => bridge.setModel(m)}
+            onModel={(p, m) => void bridge.selectModel(p, m)}
             onPermissionMode={(m) => bridge.setPermissionMode(m)}
             onThinkingLevel={(l) => bridge.setThinkingLevel(l)}
             onPickFolder={() => void pickFolder()}
@@ -351,8 +360,11 @@ export function App() {
           {view === "settings" && (
             <SettingsPage
               info={info}
+              catalog={catalog}
               onSaveKey={(name, key) => void bridge.saveProviderKey(name, key)}
               onSetActive={(name) => void bridge.setActiveProvider(name)}
+              onAddModel={(p, m) => void bridge.addCatalogModel(p, m)}
+              onRemoveModel={(p, m) => void bridge.removeCatalogModel(p, m)}
             />
           )}
         </div>

@@ -25,6 +25,13 @@ contextBridge.exposeInMainWorld("wcode", {
   decide: (sessionId, askId, decision) =>
     ipcRenderer.invoke("wcode:decide", sessionId, askId, decision),
   listModels: () => ipcRenderer.invoke("wcode:listModels"),
+  listModelCatalog: () => ipcRenderer.invoke("wcode:listModelCatalog"),
+  addCatalogModel: (provider, model) =>
+    ipcRenderer.invoke("wcode:addCatalogModel", provider, model),
+  removeCatalogModel: (provider, model) =>
+    ipcRenderer.invoke("wcode:removeCatalogModel", provider, model),
+  selectModel: (provider, model) =>
+    ipcRenderer.invoke("wcode:selectModel", provider, model),
   setModel: (model) => ipcRenderer.invoke("wcode:setModel", model),
   setContextTokens: (tokens) => ipcRenderer.invoke("wcode:setContextTokens", tokens),
   setPermissionMode: (mode) => ipcRenderer.invoke("wcode:setPermissionMode", mode),

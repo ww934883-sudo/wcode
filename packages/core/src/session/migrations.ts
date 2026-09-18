@@ -93,6 +93,21 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX idx_runs_automation ON automation_runs(automation_id, started_at DESC)`,
     ].join(";\n"),
   },
+  {
+    // 桌面端模型目录（D+2r）：各供应商配置的模型清单，模型选择器按供应商分组展示。
+    // 与 settings.json 的 providers（连接信息/密钥）分工：清单高频变动走 db，低敏低频走配置
+    id: "0003-provider-models",
+    up: [
+      `CREATE TABLE provider_models (
+        provider   TEXT NOT NULL,
+        model      TEXT NOT NULL,
+        sort       INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (provider, model)
+      )`,
+      `CREATE INDEX idx_provider_models_provider ON provider_models(provider, sort)`,
+    ].join(";\n"),
+  },
 ];
 
 /** 应用全部未执行的迁移；幂等（已登记的 id 跳过），返回本次新应用的迁移 id */
