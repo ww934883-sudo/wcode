@@ -60,14 +60,40 @@ function registerIpc(): void {
   });
   ipcMain.handle("wcode:listModels", () => rt().listModels());
   ipcMain.handle("wcode:listModelCatalog", () => rt().listModelCatalog());
-  ipcMain.handle("wcode:addCatalogModel", (_e, p: unknown, m: unknown) =>
-    rt().addCatalogModel(String(p), String(m)),
+  ipcMain.handle("wcode:addCatalogModel", (_e, p: unknown, m: unknown, c: unknown) =>
+    rt().addCatalogModel(String(p), String(m), typeof c === "string" ? c : undefined),
   );
   ipcMain.handle("wcode:removeCatalogModel", (_e, p: unknown, m: unknown) =>
     rt().removeCatalogModel(String(p), String(m)),
   );
+  ipcMain.handle("wcode:updateCatalogModel", (_e, p: unknown, m: unknown, patch: unknown) =>
+    rt().updateCatalogModel(
+      String(p),
+      String(m),
+      (patch ?? {}) as { model?: string; contextLabel?: string | null },
+    ),
+  );
   ipcMain.handle("wcode:selectModel", (_e, p: unknown, m: unknown) =>
     rt().selectModel(String(p), String(m)),
+  );
+  ipcMain.handle("wcode:addProvider", (_e, name: unknown, opts: unknown) =>
+    rt().addProvider(
+      String(name),
+      (opts ?? {}) as { type?: string; baseUrl?: string },
+    ),
+  );
+  ipcMain.handle("wcode:removeProvider", (_e, name: unknown) => rt().removeProvider(String(name)));
+  ipcMain.handle("wcode:updateProvider", (_e, name: unknown, patch: unknown) =>
+    rt().updateProvider(String(name), (patch ?? {}) as { baseUrl?: string; type?: string }),
+  );
+  ipcMain.handle("wcode:renameProvider", (_e, oldName: unknown, newName: unknown) =>
+    rt().renameProvider(String(oldName), String(newName)),
+  );
+  ipcMain.handle("wcode:setProviderEnabled", (_e, name: unknown, enabled: unknown) =>
+    rt().setProviderEnabled(String(name), Boolean(enabled)),
+  );
+  ipcMain.handle("wcode:testModel", (_e, provider: unknown, model: unknown) =>
+    rt().testModel(String(provider), String(model)),
   );
   ipcMain.handle("wcode:setModel", (_e, model: unknown) => {
     rt().setModel(String(model));

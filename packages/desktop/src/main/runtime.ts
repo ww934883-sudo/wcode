@@ -497,13 +497,22 @@ export class DesktopRuntime {
     return this.catalogFor().then((c) => c.list());
   }
 
-  async addCatalogModel(provider: string, model: string): Promise<void> {
-    (await this.catalogFor()).add(provider, model);
+  async addCatalogModel(provider: string, model: string, contextLabel?: string): Promise<void> {
+    (await this.catalogFor()).add(provider, model, contextLabel);
     this.opts.cb.onInfo();
   }
 
   async removeCatalogModel(provider: string, model: string): Promise<void> {
     (await this.catalogFor()).remove(provider, model);
+    this.opts.cb.onInfo();
+  }
+
+  async updateCatalogModel(
+    provider: string,
+    model: string,
+    patch: { model?: string; contextLabel?: string | null },
+  ): Promise<void> {
+    (await this.catalogFor()).updateModel(provider, model, patch);
     this.opts.cb.onInfo();
   }
 
@@ -516,6 +525,167 @@ export class DesktopRuntime {
     await patchUserSettings((obj) => {
       obj.model = model;
     }, this.homeDir);
+  }
+
+  // ── 供应商管理（设置页两栏）：配置接缝（settings.json）上的 CRUD ──
+
+  /** 添加供应商：type 缺省 openai-compatible（多数国产网关的公约数） */
+  async addProvider(
+    name: string,
+    opts: { type?: string; baseUrl?: string } = {},
+  ): Promise<void> {
+    const key = name.trim();
+    if (!key) throw new Error("供应商名称不能为空");
+    const type = opts.type === "anthropic" || opts.type === "openai-responses" ? opts.type : "openai-compatible";
+    await patchUserSettings((obj) => {
+      const providers = (obj.providers as Record<string, Record<string, unknown>> | undefined) ?? {};
+      if (providers[key]) throw new Error(`供应商 "${key}" 已存在`);
+      providers[key] = {
+        type,
+        apiKeyEnv: type === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY",
+        ...(opts.baseUrl?.trim() ? { baseUrl: opts.baseUrl.trim() } : {}),
+        enabled: true,
+      };
+      obj.providers = providers;
+    }, this.homeDir);
+    await this.reloadConfig();
+    this.notice = `已添加供应商 ${key}，录入 API key 后即可使用`;
+    this.opts.cb.onInfo();
+  }
+
+  /** 删除供应商：目录模型级联清除；删的是当前供应商则切到剩余第一个 */
+  async removeProvider(name: string): Promise<void> {
+    const key = name.trim();
+    await patchUserSettings((obj) => {
+      const providers = (obj.providers as Record<string, Record<string, unknown>> | undefined) ?? {};
+      if (!providers[key]) throw new Error(`供应商 "${key}" 不存在`);
+      delete providers[key];
+      obj.providers = providers;
+      if (obj.activeProvider === key) {
+        const rest = Object.keys(providers);
+        obj.activeProvider = rest[0] ?? "anthropic";
+      }
+    }, this.homeDir);
+    (await this.catalogFor()).removeProvider(key);
+    await this.reloadConfig();
+    if (this.mode === "real") {
+      try {
+        this.realProvider = this.buildRealProvider(this.model);
+      } catch {
+        // 删掉的是当前供应商且无可用配置：保持旧 provider 对象，设置页会提示缺 key
+      }
+    }
+    this.notice = `已删除供应商 ${key}`;
+    this.opts.cb.onInfo();
+  }
+
+  /** 更新接口配置（baseUrl / type）；当前供应商即时重建 provider */
+  async updateProvider(
+    name: string,
+    patch: { baseUrl?: string; type?: string },
+  ): Promise<void> {
+    await patchUserSettings((obj) => {
+      const providers = (obj.providers as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const entry = providers[name.trim()];
+      if (!entry) throw new Error(`供应商 "${name}" 不存在`);
+      if (patch.baseUrl !== undefined) {
+        if (patch.baseUrl.trim() === "") delete entry.baseUrl;
+        else entry.baseUrl = patch.baseUrl.trim();
+      }
+      if (patch.type !== undefined) {
+        if (patch.type !== "anthropic" && patch.type !== "openai-compatible" && patch.type !== "openai-responses") {
+          throw new Error(`未知接口格式 ${patch.type}`);
+        }
+        entry.type = patch.type;
+      }
+      providers[name.trim()] = entry;
+      obj.providers = providers;
+    }, this.homeDir);
+    await this.reloadConfig();
+    if (this.mode === "real" && name.trim() === this.activeProviderName()) {
+      this.rebuildRealProvider();
+    }
+    this.opts.cb.onInfo();
+  }
+
+  /** 供应商改名：配置键迁移 + 目录整组迁移；当前使用中的也跟随 */
+  async renameProvider(oldName: string, newName: string): Promise<void> {
+    const from = oldName.trim();
+    const to = newName.trim();
+    if (!to) throw new Error("供应商名称不能为空");
+    if (from === to) return;
+    await patchUserSettings((obj) => {
+      const providers = (obj.providers as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const entry = providers[from];
+      if (!entry) throw new Error(`供应商 "${from}" 不存在`);
+      if (providers[to]) throw new Error(`供应商 "${to}" 已存在`);
+      delete providers[from];
+      providers[to] = entry;
+      obj.providers = providers;
+      if (obj.activeProvider === from) obj.activeProvider = to;
+    }, this.homeDir);
+    (await this.catalogFor()).renameProvider(from, to);
+    await this.reloadConfig();
+    this.opts.cb.onInfo();
+  }
+
+  /** 启用/禁用：禁用的供应商在模型列表中隐藏（当前使用中的不禁用，避免聊天断掉） */
+  async setProviderEnabled(name: string, enabled: boolean): Promise<void> {
+    if (!enabled && name.trim() === this.activeProviderName()) {
+      throw new Error("当前使用中的供应商不能禁用，请先切换到其他供应商");
+    }
+    await patchUserSettings((obj) => {
+      const providers = (obj.providers as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const entry = providers[name.trim()];
+      if (!entry) throw new Error(`供应商 "${name}" 不存在`);
+      entry.enabled = enabled;
+      providers[name.trim()] = entry;
+      obj.providers = providers;
+    }, this.homeDir);
+    await this.reloadConfig();
+    this.opts.cb.onInfo();
+  }
+
+  /** 连通性测试：对（供应商, 模型）发一次最小请求（max_tokens=16），首响应即成功 */
+  async testModel(
+    providerName: string,
+    model: string,
+  ): Promise<{ ok: boolean; latencyMs: number; sample?: string; error?: string }> {
+    const started = Date.now();
+    if (this.mode === "demo") {
+      return { ok: true, latencyMs: 0, sample: "演示模式：连通性测试返回固定成功" };
+    }
+    const cfg = this.config?.providers[providerName.trim()];
+    if (!cfg) return { ok: false, latencyMs: 0, error: `供应商 "${providerName}" 不存在` };
+    const key = cfg.apiKey ?? (cfg ? process.env[cfg.apiKeyEnv] ?? "" : "");
+    if (!key) return { ok: false, latencyMs: 0, error: "缺少 API key" };
+    let provider: ModelProvider;
+    try {
+      provider =
+        cfg.type === "anthropic"
+          ? new AnthropicProvider({ apiKey: key, model, baseUrl: cfg.baseUrl })
+          : cfg.type === "openai-responses"
+            ? new OpenAIResponsesProvider({ apiKey: key, model, baseUrl: cfg.baseUrl })
+            : new OpenAIChatProvider({ apiKey: key, model, baseUrl: cfg.baseUrl });
+    } catch (err) {
+      return { ok: false, latencyMs: 0, error: errorMessage(err) };
+    }
+    try {
+      let sample = "";
+      for await (const ev of provider.stream({
+        system: "",
+        messages: [{ role: "user", content: "只回复两个字母：OK" }],
+        tools: [],
+        maxTokens: 16,
+        signal: AbortSignal.timeout(20_000),
+      })) {
+        if (ev.type === "text_delta") sample += ev.text;
+        if (ev.type === "message_complete") break;
+      }
+      return { ok: true, latencyMs: Date.now() - started, sample: sample.trim().slice(0, 40) };
+    } catch (err) {
+      return { ok: false, latencyMs: Date.now() - started, error: errorMessage(err) };
+    }
   }
 
   /** 模型热切：真实模式重建 provider 并换入空闲会话（运行中的会话保持不动） */
@@ -765,6 +935,8 @@ export class DesktopRuntime {
         name,
         type: cfg.type,
         hasKey: Boolean(cfg.apiKey) || Boolean(process.env[cfg.apiKeyEnv]),
+        enabled: cfg.enabled,
+        baseUrl: cfg.baseUrl ?? null,
         active: name === this.activeProviderName(),
       })),
       stats: stats ?? { sessionCount: 0, messageCount: 0, inputTokens: 0, outputTokens: 0 },

@@ -48,6 +48,8 @@ export const configSchema = z.object({
         priceInput: z.number().optional(),
         priceOutput: z.number().optional(),
         priceCurrency: z.string().optional(),
+        /** 启用状态（桌面端设置页）：false = 侧栏灰点，模型列表不展示该组 */
+        enabled: z.boolean().default(true),
       }),
     )
     .default({

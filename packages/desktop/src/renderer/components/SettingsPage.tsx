@@ -1,120 +1,503 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ModelCatalogGroup, RuntimeInfo } from "../../shared/protocol";
+
+const TYPE_OPTIONS = [
+  { value: "anthropic", label: "Anthropic Messages (/v1/messages)" },
+  { value: "openai-compatible", label: "OpenAI Chat Completions (/v1/chat/completions)" },
+  { value: "openai-responses", label: "OpenAI Responses (/v1/responses)" },
+];
+
+const API_FORMATS: Record<string, string> = {
+  anthropic: "Anthropic Messages (/v1/messages)",
+  "openai-compatible": "OpenAI Chat Completions (/v1/chat/completions)",
+  "openai-responses": "OpenAI Responses (/v1/responses)",
+};
+
+interface TestState {
+  status: "running" | "ok" | "fail";
+  latencyMs?: number;
+  error?: string;
+}
 
 export function SettingsPage({
   info,
   catalog,
-  onSaveKey,
+  onAddProvider,
+  onRemoveProvider,
+  onUpdateProvider,
+  onRenameProvider,
+  onSetEnabled,
   onSetActive,
+  onSaveKey,
+  onTestModel,
   onAddModel,
   onRemoveModel,
+  onUpdateModel,
 }: {
   info: RuntimeInfo | null;
   catalog: ModelCatalogGroup[];
-  onSaveKey: (name: string, key: string) => void;
+  onAddProvider: (name: string, opts: { type: string; baseUrl: string }) => void;
+  onRemoveProvider: (name: string) => void;
+  onUpdateProvider: (name: string, patch: { baseUrl?: string; type?: string }) => void;
+  onRenameProvider: (oldName: string, newName: string) => void;
+  onSetEnabled: (name: string, enabled: boolean) => void;
   onSetActive: (name: string) => void;
-  onAddModel: (provider: string, model: string) => void;
+  onSaveKey: (name: string, key: string) => void;
+  onTestModel: (provider: string, model: string) => Promise<{ ok: boolean; latencyMs: number; sample?: string; error?: string }>;
+  onAddModel: (provider: string, model: string, contextLabel?: string) => void;
   onRemoveModel: (provider: string, model: string) => void;
+  onUpdateModel: (provider: string, model: string, patch: { model?: string; contextLabel?: string | null }) => void;
 }) {
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const [modelDraft, setModelDraft] = useState<Record<string, string>>({});
+  const providers = info?.providers ?? [];
+  const [selectedName, setSelectedName] = useState<string | null>(null);
+  // 选中编辑的供应商：默认跟随当前使用中的；被删除后回落
+  const selected = providers.some((p) => p.name === selectedName)
+    ? selectedName
+    : (providers.find((p) => p.active) ?? providers[0])?.name ?? null;
+  const cur = providers.find((p) => p.name === selected) ?? null;
+
+  const [err, setErr] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [addDraft, setAddDraft] = useState({ name: "", type: "openai-compatible", baseUrl: "" });
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [urlDraft, setUrlDraft] = useState("");
+  const [keyDraft, setKeyDraft] = useState("");
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [testState, setTestState] = useState<Record<string, TestState>>({});
+  const [editingModel, setEditingModel] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ model: "", contextLabel: "" });
+  const [newModel, setNewModel] = useState({ model: "", contextLabel: "" });
+
+  // 切换供应商时同步草稿
+  useEffect(() => {
+    setUrlDraft(cur?.baseUrl ?? "");
+    setKeyDraft("");
+    setRenaming(false);
+    setEditingModel(null);
+  }, [cur?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const run = async (fn: () => Promise<unknown> | unknown): Promise<boolean> => {
+    setErr("");
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  };
+
+  const entries = catalog.find((g) => g.provider === cur?.name)?.models ?? [];
+
+  const runTest = async (model: string) => {
+    if (!cur) return;
+    setTestState((s) => ({ ...s, [model]: { status: "running" } }));
+    const r = await onTestModel(cur.name, model);
+    setTestState((s) => ({
+      ...s,
+      [model]: r.ok
+        ? { status: "ok", latencyMs: r.latencyMs }
+        : { status: "fail", error: r.error },
+    }));
+  };
+
   return (
     <div className="page">
-      <h1>设置</h1>
-      <p className="page-sub">
-        API 密钥只写入用户级 ~/.wcode/settings.json（仓库外；渲染层不接触明文，保存动作经主进程落盘）。
-        配置的模型存入 SQLite（~/.wcode/wcode.db provider_models 表），输入框的模型列表按供应商分组展示。
-        当前模式：{info?.mode === "demo" ? "演示（配置 key 后重启应用进入真实模型）" : "真实模型"}。
-      </p>
-      {(info?.providers.length ?? 0) === 0 && (
-        <div className="empty-hint">
-          未配置任何服务商——在 ~/.wcode/settings.json 里添加 providers 后重启，或直接在此录入。
-        </div>
-      )}
-      {info?.providers.map((p) => {
-        const models = catalog.find((g) => g.provider === p.name)?.models ?? [];
-        return (
-          <div key={p.name} className="row-card">
-            <label className="row-main">
-              <input
-                type="radio"
-                name="active-provider"
-                checked={p.active}
-                onChange={() => onSetActive(p.name)}
-                title="设为默认服务商"
-              />
-              <span className="row-title">{p.name}</span>
-              <span className="chip">{p.type}</span>
-              <span className={`chip ${p.hasKey ? "ok" : "warn"}`}>
-                {p.hasKey ? "已配置 key" : "缺 key"}
-              </span>
-            </label>
-            <div className="row-actions">
-              <input
-                type="password"
-                className="key-input"
-                placeholder={p.hasKey ? "已配置（输入可覆盖）" : "sk-…"}
-                value={draft[p.name] ?? ""}
-                onChange={(e) => setDraft((d) => ({ ...d, [p.name]: e.target.value }))}
-              />
+      <div className="settings-shell">
+        {/* ── 左：供应商导航 ── */}
+        <aside className="settings-nav">
+          <div className="settings-nav-title">供应商</div>
+          <div className="settings-nav-list">
+            {providers.map((p) => (
               <button
-                className="btn primary"
-                disabled={(draft[p.name] ?? "") === ""}
-                onClick={() => {
-                  onSaveKey(p.name, draft[p.name] ?? "");
-                  setDraft((d) => ({ ...d, [p.name]: "" }));
-                }}
+                key={p.name}
+                className={"settings-nav-item" + (p.name === selected ? " on" : "")}
+                onClick={() => setSelectedName(p.name)}
+                title={p.name}
               >
-                保存
+                <span className={"status-dot" + (p.enabled ? " ok" : "")} />
+                <span className="settings-nav-name">{p.name}</span>
+                {p.active && <span className="chip ok">使用中</span>}
               </button>
-            </div>
-            <div className="row-models">
-              <span className="row-sub">配置模型（{models.length}）</span>
-              <div className="model-chips">
-                {models.map((m) => (
-                  <span key={m} className={"model-chip" + (p.active && m === info?.model ? " on" : "")}>
-                    <span className="mono">{m}</span>
-                    <button
-                      className="model-chip-del"
-                      title={`删除 ${m}`}
-                      aria-label={`删除模型 ${m}`}
-                      onClick={() => onRemoveModel(p.name, m)}
-                    >
-                      ×
-                    </button>
-                  </span>
+            ))}
+          </div>
+          {showAdd ? (
+            <div className="settings-add">
+              <input
+                placeholder="名称（如 Kimi）"
+                value={addDraft.name}
+                onChange={(e) => setAddDraft((d) => ({ ...d, name: e.target.value }))}
+              />
+              <select
+                value={addDraft.type}
+                onChange={(e) => setAddDraft((d) => ({ ...d, type: e.target.value }))}
+              >
+                {TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
                 ))}
-                {models.length === 0 && <span className="row-sub">暂无——添加模型 id 后会出现在输入框的模型列表里</span>}
-              </div>
-              <div className="model-add">
-                <input
-                  className="key-input"
-                  placeholder="模型 id（如 glm-5.3-flash）"
-                  value={modelDraft[p.name] ?? ""}
-                  onChange={(e) => setModelDraft((d) => ({ ...d, [p.name]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (modelDraft[p.name] ?? "").trim() !== "") {
-                      onAddModel(p.name, (modelDraft[p.name] ?? "").trim());
-                      setModelDraft((d) => ({ ...d, [p.name]: "" }));
-                    }
-                  }}
-                />
+              </select>
+              <input
+                placeholder="Base URL（可留空）"
+                value={addDraft.baseUrl}
+                onChange={(e) => setAddDraft((d) => ({ ...d, baseUrl: e.target.value }))}
+              />
+              <div className="settings-add-actions">
                 <button
-                  className="btn"
-                  disabled={(modelDraft[p.name] ?? "").trim() === ""}
-                  onClick={() => {
-                    onAddModel(p.name, (modelDraft[p.name] ?? "").trim());
-                    setModelDraft((d) => ({ ...d, [p.name]: "" }));
-                  }}
+                  className="btn primary"
+                  disabled={addDraft.name.trim() === ""}
+                  onClick={() =>
+                    void run(async () => {
+                      await onAddProvider(addDraft.name.trim(), {
+                        type: addDraft.type,
+                        baseUrl: addDraft.baseUrl,
+                      });
+                      setSelectedName(addDraft.name.trim());
+                      setShowAdd(false);
+                      setAddDraft({ name: "", type: "openai-compatible", baseUrl: "" });
+                    })
+                  }
                 >
-                  添加
+                  创建
+                </button>
+                <button className="btn" onClick={() => setShowAdd(false)}>
+                  取消
                 </button>
               </div>
             </div>
-          </div>
-        );
-      })}
-      {info?.notice && <div className="foot-notice page-notice">{info.notice}</div>}
+          ) : (
+            <button className="settings-add-btn" onClick={() => setShowAdd(true)}>
+              ＋ 添加供应商
+            </button>
+          )}
+        </aside>
+
+        {/* ── 右：选中供应商的详情配置 ── */}
+        <section className="settings-detail">
+          {cur ? (
+            <>
+              <div className="settings-detail-head">
+                {renaming ? (
+                  <span className="rename-row">
+                    <input
+                      value={renameDraft}
+                      autoFocus
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          void run(async () => {
+                            await onRenameProvider(cur.name, renameDraft.trim());
+                            setSelectedName(renameDraft.trim());
+                            setRenaming(false);
+                          });
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn primary"
+                      onClick={() =>
+                        void run(async () => {
+                          await onRenameProvider(cur.name, renameDraft.trim());
+                          setSelectedName(renameDraft.trim());
+                          setRenaming(false);
+                        })
+                      }
+                    >
+                      保存
+                    </button>
+                    <button className="btn" onClick={() => setRenaming(false)}>
+                      取消
+                    </button>
+                  </span>
+                ) : (
+                  <h2 className="settings-name">
+                    {cur.name}
+                    <button
+                      className="icon-btn"
+                      title="重命名"
+                      onClick={() => {
+                        setRenameDraft(cur.name);
+                        setRenaming(true);
+                      }}
+                    >
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                        <path
+                          d="M11.3 2.2l2.5 2.5L6 12.5l-3.2.7.7-3.2zM10 3.5l2.5 2.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.3"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </h2>
+                )}
+                <div className="settings-head-actions">
+                  <span className={"chip " + (cur.enabled ? "ok" : "")}>
+                    {cur.enabled ? "已启用" : "已禁用"}
+                  </span>
+                  <button
+                    className="btn"
+                    disabled={cur.active && cur.enabled}
+                    title={cur.active && cur.enabled ? "当前使用中的供应商不能禁用" : ""}
+                    onClick={() => void run(() => onSetEnabled(cur.name, !cur.enabled))}
+                  >
+                    {cur.enabled ? "禁用" : "启用"}
+                  </button>
+                  {!cur.active && (
+                    <button className="btn primary" onClick={() => void run(() => onSetActive(cur.name))}>
+                      设为当前使用
+                    </button>
+                  )}
+                  <button
+                    className="icon-btn danger"
+                    title="删除供应商"
+                    onClick={() => {
+                      if (!window.confirm(`删除供应商「${cur.name}」？其配置模型列表将一并清除。`)) return;
+                      void run(async () => {
+                        await onRemoveProvider(cur.name);
+                        setSelectedName(null);
+                      });
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                      <path
+                        d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.3"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-fields">
+                <label className="field">
+                  <span>Base URL</span>
+                  <div className="field-row">
+                    <input
+                      value={urlDraft}
+                      placeholder="https://api.kimi.com/coding"
+                      onChange={(e) => setUrlDraft(e.target.value)}
+                    />
+                    <button
+                      className="btn"
+                      disabled={urlDraft === (cur.baseUrl ?? "")}
+                      onClick={() => void run(() => onUpdateProvider(cur.name, { baseUrl: urlDraft }))}
+                    >
+                      保存
+                    </button>
+                  </div>
+                </label>
+                <label className="field">
+                  <span>API 格式</span>
+                  <div className="field-row">
+                    <select
+                      value={cur.type}
+                      onChange={(e) => void run(() => onUpdateProvider(cur.name, { type: e.target.value }))}
+                    >
+                      {TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </label>
+                <label className="field">
+                  <span>API Key</span>
+                  <div className="field-row">
+                    <input
+                      type={keyVisible ? "text" : "password"}
+                      placeholder={cur.hasKey ? "已配置（输入可覆盖）" : "sk-…"}
+                      value={keyDraft}
+                      onChange={(e) => setKeyDraft(e.target.value)}
+                    />
+                    <button
+                      className="icon-btn"
+                      title={keyVisible ? "隐藏" : "显示"}
+                      onClick={() => setKeyVisible((v) => !v)}
+                    >
+                      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        {keyVisible ? (
+                          <>
+                            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </>
+                        ) : (
+                          <>
+                            <path d="M2 12s3.5-7 10-7c2 0 3.7.6 5.2 1.5M22 12s-3.5 7-10 7c-2 0-3.7-.6-5.2-1.5" />
+                            <path d="M4 20L20 4" />
+                          </>
+                        )}
+                      </svg>
+                    </button>
+                    <button
+                      className="btn primary"
+                      disabled={keyDraft === ""}
+                      onClick={() =>
+                        void run(async () => {
+                          await onSaveKey(cur.name, keyDraft);
+                          setKeyDraft("");
+                        })
+                      }
+                    >
+                      保存
+                    </button>
+                  </div>
+                </label>
+              </div>
+
+              <div className="settings-models">
+                <div className="settings-models-title">
+                  模型列表（{entries.length}）
+                  {cur.hasKey ? "" : " — 缺 API key，测试前请先录入"}
+                </div>
+                {entries.map((e) => {
+                  const t = testState[e.model];
+                  return (
+                    <div key={e.model} className="model-row">
+                      {editingModel === e.model ? (
+                        <span className="model-edit">
+                          <input
+                            value={editDraft.model}
+                            autoFocus
+                            placeholder="模型 id"
+                            onChange={(ev) => setEditDraft((d) => ({ ...d, model: ev.target.value }))}
+                          />
+                          <input
+                            className="ctx-input"
+                            value={editDraft.contextLabel}
+                            placeholder="上下文（如 1M）"
+                            onChange={(ev) => setEditDraft((d) => ({ ...d, contextLabel: ev.target.value }))}
+                          />
+                          <button
+                            className="btn primary"
+                            onClick={() =>
+                              void run(async () => {
+                                await onUpdateModel(cur.name, e.model, {
+                                  model: editDraft.model.trim() || e.model,
+                                  contextLabel: editDraft.contextLabel.trim() || null,
+                                });
+                                setEditingModel(null);
+                              })
+                            }
+                          >
+                            保存
+                          </button>
+                          <button className="btn" onClick={() => setEditingModel(null)}>
+                            取消
+                          </button>
+                        </span>
+                      ) : (
+                        <>
+                          <span className="mono">{e.model}</span>
+                          {e.contextLabel && <span className="ctx-chip">{e.contextLabel}</span>}
+                          <span className="model-row-actions">
+                            <button
+                              className="icon-btn"
+                              title="测试连通性"
+                              disabled={t?.status === "running"}
+                              onClick={() => void runTest(e.model)}
+                            >
+                              {t?.status === "running" ? (
+                                <span className="spin">◠</span>
+                              ) : (
+                                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                                  <path
+                                    d="M13 2L4.5 13.5H11L9.5 22 19 9.5h-6.5z"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              )}
+                            </button>
+                            <button
+                              className="icon-btn"
+                              title="编辑模型"
+                              onClick={() => {
+                                setEditDraft({ model: e.model, contextLabel: e.contextLabel ?? "" });
+                                setEditingModel(e.model);
+                              }}
+                            >
+                              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                                <path
+                                  d="M11.3 2.2l2.5 2.5L6 12.5l-3.2.7.7-3.2zM10 3.5l2.5 2.5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.3"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                            </button>
+                            <button
+                              className="icon-btn danger"
+                              title="删除模型"
+                              onClick={() => void run(() => onRemoveModel(cur.name, e.model))}
+                            >
+                              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                                <path
+                                  d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.3"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                            </button>
+                          </span>
+                        </>
+                      )}
+                      {t?.status === "ok" && <span className="test-result ok">✓ {t.latencyMs}ms</span>}
+                      {t?.status === "fail" && <span className="test-result fail">{t.error}</span>}
+                    </div>
+                  );
+                })}
+                <div className="model-add-row">
+                  <input
+                    placeholder="模型 id（如 kimi-for-coding）"
+                    value={newModel.model}
+                    onChange={(e) => setNewModel((d) => ({ ...d, model: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newModel.model.trim() !== "" && cur) {
+                        onAddModel(cur.name, newModel.model.trim(), newModel.contextLabel.trim() || undefined);
+                        setNewModel({ model: "", contextLabel: "" });
+                      }
+                    }}
+                  />
+                  <input
+                    className="ctx-input"
+                    placeholder="上下文（可空，如 1M）"
+                    value={newModel.contextLabel}
+                    onChange={(e) => setNewModel((d) => ({ ...d, contextLabel: e.target.value }))}
+                  />
+                  <button
+                    className="btn"
+                    disabled={newModel.model.trim() === ""}
+                    onClick={() => {
+                      if (!cur) return;
+                      onAddModel(cur.name, newModel.model.trim(), newModel.contextLabel.trim() || undefined);
+                      setNewModel({ model: "", contextLabel: "" });
+                    }}
+                  >
+                    ＋ 添加模型
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="empty-hint">还没有供应商——点左侧「＋ 添加供应商」创建。</div>
+          )}
+          {err && <div className="foot-notice page-notice">{err}</div>}
+          {info?.notice && !err && <div className="foot-notice page-notice">{info.notice}</div>}
+        </section>
+      </div>
     </div>
   );
 }

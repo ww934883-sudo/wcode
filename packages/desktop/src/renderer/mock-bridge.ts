@@ -36,10 +36,20 @@ export function createMockBridge(): WcodeBridge {
   let permSeq = 0;
   let model = DEMO_MODELS[0] ?? "wcode-demo";
   let activeProvider = "anthropic";
-  const mockCatalog = new Map<string, Set<string>>([
-    ["anthropic", new Set(["claude-sonnet-4-6"])],
-    ["zhipu", new Set(["glm-5.3-flash", "deepseek-v3"])],
+  const mockCatalog = new Map<string, Map<string, string | null>>([
+    ["anthropic", new Map([["claude-sonnet-4-6", "200K"]])],
+    ["zhipu", new Map([["glm-5.3-flash", "1M"], ["deepseek-v3", "128K"]])],
   ]);
+  const mockProviders: {
+    name: string;
+    type: string;
+    hasKey: boolean;
+    enabled: boolean;
+    baseUrl: string | null;
+  }[] = [
+    { name: "anthropic", type: "anthropic", hasKey: false, enabled: true, baseUrl: "https://api.anthropic.com" },
+    { name: "zhipu", type: "openai-compatible", hasKey: true, enabled: true, baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+  ];
   let contextTokens = 200_000;
   let permissionMode: PermissionMode = "default";
   let thinkingLevel: ThinkingLevel = "medium";
@@ -120,10 +130,7 @@ export function createMockBridge(): WcodeBridge {
         command: [cfg.command, ...cfg.args].join(" "),
         connected: mcpConnected,
       })),
-      providers: [
-        { name: "anthropic", type: "anthropic", hasKey: false, active: activeProvider === "anthropic" },
-        { name: "zhipu", type: "openai-compatible", hasKey: true, active: activeProvider === "zhipu" },
-      ],
+      providers: mockProviders.map((p) => ({ ...p, active: p.name === activeProvider })),
       stats: { sessionCount: sessions.size, messageCount, inputTokens: 4523, outputTokens: 921 },
       notice,
     };
@@ -311,10 +318,16 @@ export function createMockBridge(): WcodeBridge {
     listModelCatalog: async () =>
       [...mockCatalog.entries()]
         .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([provider, models]) => ({ provider, models: [...models] })),
-    addCatalogModel: async (provider, m) => {
-      const list = mockCatalog.get(provider) ?? new Set<string>();
-      list.add(m);
+        .map(([provider, models]) => ({
+          provider,
+          models: [...models].map(([model, contextLabel]) => ({
+            model,
+            ...(contextLabel ? { contextLabel } : {}),
+          })),
+        })),
+    addCatalogModel: async (provider, m, contextLabel) => {
+      const list = mockCatalog.get(provider) ?? new Map<string, string | null>();
+      list.set(m, contextLabel?.trim() || null);
       mockCatalog.set(provider, list);
       bump();
     },
@@ -322,11 +335,70 @@ export function createMockBridge(): WcodeBridge {
       mockCatalog.get(provider)?.delete(m);
       bump();
     },
+    updateCatalogModel: async (provider, m, patch) => {
+      const list = mockCatalog.get(provider);
+      const label = list?.get(m) ?? null;
+      if (!list || !list.has(m)) return;
+      list.delete(m);
+      list.set(patch.model?.trim() || m, patch.contextLabel === null ? null : (patch.contextLabel?.trim() || label));
+      bump();
+    },
     selectModel: async (provider, m) => {
       activeProvider = provider;
       model = m;
       bump();
     },
+    addProvider: async (name, opts) => {
+      if (mockProviders.some((p) => p.name === name)) throw new Error(`供应商 "${name}" 已存在`);
+      mockProviders.push({
+        name,
+        type: opts?.type === "anthropic" ? "anthropic" : "openai-compatible",
+        hasKey: false,
+        enabled: true,
+        baseUrl: opts?.baseUrl?.trim() || null,
+      });
+      notice = `已添加供应商 ${name}（浏览器预览为模拟数据）`;
+      bump();
+    },
+    removeProvider: async (name) => {
+      const idx = mockProviders.findIndex((p) => p.name === name);
+      if (idx < 0) throw new Error(`供应商 "${name}" 不存在`);
+      mockProviders.splice(idx, 1);
+      mockCatalog.delete(name);
+      if (activeProvider === name) activeProvider = mockProviders[0]?.name ?? "anthropic";
+      notice = `已删除供应商 ${name}（浏览器预览为模拟数据）`;
+      bump();
+    },
+    updateProvider: async (name, patch) => {
+      const p = mockProviders.find((x) => x.name === name);
+      if (!p) throw new Error(`供应商 "${name}" 不存在`);
+      if (patch.baseUrl !== undefined) p.baseUrl = patch.baseUrl.trim() || null;
+      if (patch.type) p.type = patch.type;
+      bump();
+    },
+    renameProvider: async (oldName, newName) => {
+      const p = mockProviders.find((x) => x.name === oldName);
+      if (!p) throw new Error(`供应商 "${oldName}" 不存在`);
+      p.name = newName;
+      const catalog = mockCatalog.get(oldName);
+      if (catalog) {
+        mockCatalog.delete(oldName);
+        mockCatalog.set(newName, catalog);
+      }
+      if (activeProvider === oldName) activeProvider = newName;
+      bump();
+    },
+    setProviderEnabled: async (name, enabled) => {
+      const p = mockProviders.find((x) => x.name === name);
+      if (!p) throw new Error(`供应商 "${name}" 不存在`);
+      p.enabled = enabled;
+      bump();
+    },
+    testModel: async (provider, m) => ({
+      ok: true,
+      latencyMs: 420,
+      sample: `${provider}/${m} 连通（浏览器预览固定成功）`,
+    }),
     setModel: async (m) => {
       model = m;
       bump();

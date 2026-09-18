@@ -26,12 +26,22 @@ contextBridge.exposeInMainWorld("wcode", {
     ipcRenderer.invoke("wcode:decide", sessionId, askId, decision),
   listModels: () => ipcRenderer.invoke("wcode:listModels"),
   listModelCatalog: () => ipcRenderer.invoke("wcode:listModelCatalog"),
-  addCatalogModel: (provider, model) =>
-    ipcRenderer.invoke("wcode:addCatalogModel", provider, model),
+  addCatalogModel: (provider, model, contextLabel) =>
+    ipcRenderer.invoke("wcode:addCatalogModel", provider, model, contextLabel),
   removeCatalogModel: (provider, model) =>
     ipcRenderer.invoke("wcode:removeCatalogModel", provider, model),
+  updateCatalogModel: (provider, model, patch) =>
+    ipcRenderer.invoke("wcode:updateCatalogModel", provider, model, patch),
   selectModel: (provider, model) =>
     ipcRenderer.invoke("wcode:selectModel", provider, model),
+  addProvider: (name, opts) => ipcRenderer.invoke("wcode:addProvider", name, opts),
+  removeProvider: (name) => ipcRenderer.invoke("wcode:removeProvider", name),
+  updateProvider: (name, patch) => ipcRenderer.invoke("wcode:updateProvider", name, patch),
+  renameProvider: (oldName, newName) =>
+    ipcRenderer.invoke("wcode:renameProvider", oldName, newName),
+  setProviderEnabled: (name, enabled) =>
+    ipcRenderer.invoke("wcode:setProviderEnabled", name, enabled),
+  testModel: (provider, model) => ipcRenderer.invoke("wcode:testModel", provider, model),
   setModel: (model) => ipcRenderer.invoke("wcode:setModel", model),
   setContextTokens: (tokens) => ipcRenderer.invoke("wcode:setContextTokens", tokens),
   setPermissionMode: (mode) => ipcRenderer.invoke("wcode:setPermissionMode", mode),

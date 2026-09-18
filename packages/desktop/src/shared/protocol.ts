@@ -35,7 +35,18 @@ export interface ProviderEntry {
   name: string;
   type: string;
   hasKey: boolean;
+  /** 启用状态（false = 设置页灰点，模型列表隐藏该组） */
+  enabled: boolean;
+  baseUrl: string | null;
   active: boolean;
+}
+
+/** 模型连通性测试结果 */
+export interface ModelTestResult {
+  ok: boolean;
+  latencyMs: number;
+  sample?: string;
+  error?: string;
 }
 
 export interface AgentEntry {
@@ -189,10 +200,23 @@ export interface WcodeBridge {
   listModels(): Promise<string[]>;
   /** 供应商模型目录（SQLite provider_models 表）：按供应商分组的配置模型 */
   listModelCatalog(): Promise<ModelCatalogGroup[]>;
-  addCatalogModel(provider: string, model: string): Promise<void>;
+  addCatalogModel(provider: string, model: string, contextLabel?: string): Promise<void>;
   removeCatalogModel(provider: string, model: string): Promise<void>;
+  updateCatalogModel(
+    provider: string,
+    model: string,
+    patch: { model?: string; contextLabel?: string | null },
+  ): Promise<void>;
   /** 选择模型 = 供应商 + 模型一起切（写配置持久化，空闲会话热切换） */
   selectModel(provider: string, model: string): Promise<void>;
+  // ── 供应商管理（设置页两栏）──
+  addProvider(name: string, opts?: { type?: string; baseUrl?: string }): Promise<void>;
+  removeProvider(name: string): Promise<void>;
+  updateProvider(name: string, patch: { baseUrl?: string; type?: string }): Promise<void>;
+  renameProvider(oldName: string, newName: string): Promise<void>;
+  setProviderEnabled(name: string, enabled: boolean): Promise<void>;
+  /** 连通性测试：对（供应商, 模型）发一次最小请求 */
+  testModel(provider: string, model: string): Promise<ModelTestResult>;
   /** 以下三项对新会话生效（模型选择即时热切活会话） */
   setModel(model: string): Promise<void>;
   setContextTokens(tokens: number): Promise<void>;

@@ -3,7 +3,8 @@ import type { ModelCatalogGroup } from "../../shared/protocol";
 
 /**
  * 模型选择器（按供应商分组）：按钮显示当前供应商/模型，
- * 下拉按供应商分组列出配置的模型，选中即同时切换供应商与模型。
+ * 下拉按供应商分组列出配置的模型（右侧带上下文标注），
+ * 选中即同时切换供应商与模型。
  */
 export function ModelSelect({
   catalog,
@@ -31,13 +32,13 @@ export function ModelSelect({
   // 兜底：当前模型不在目录（如刚改配置未入库）时补进当前供应商组，保证选中态可见
   const groups: ModelCatalogGroup[] = (() => {
     const cur = catalog.find((g) => g.provider === provider);
-    if (cur?.models.includes(model)) return catalog;
+    if (cur?.models.some((e) => e.model === model)) return catalog;
     if (cur) {
       return catalog.map((g) =>
-        g === cur ? { ...g, models: [model, ...g.models] } : g,
+        g === cur ? { ...g, models: [{ model }, ...g.models] } : g,
       );
     }
-    return [...catalog, { provider, models: [model] }];
+    return [...catalog, { provider, models: [{ model }] }];
   })();
 
   return (
@@ -68,22 +69,25 @@ export function ModelSelect({
                 <span className="model-dd-provider">{g.provider}</span>
                 {g.provider === provider && <span className="chip ok">当前</span>}
               </div>
-              {g.models.map((m) => {
-                const active = g.provider === provider && m === model;
+              {g.models.map((e) => {
+                const active = g.provider === provider && e.model === model;
                 return (
                   <button
-                    key={m}
+                    key={e.model}
                     type="button"
                     role="option"
                     aria-selected={active}
                     className={"model-dd-item" + (active ? " on" : "")}
                     onClick={() => {
                       setOpen(false);
-                      if (!active) onSelect(g.provider, m);
+                      if (!active) onSelect(g.provider, e.model);
                     }}
                   >
-                    <span className="mono">{m}</span>
-                    {active && <span className="model-dd-check">✓</span>}
+                    <span className="mono">{e.model}</span>
+                    <span className="model-dd-side">
+                      {e.contextLabel && <span className="ctx-chip">{e.contextLabel}</span>}
+                      {active && <span className="model-dd-check">✓</span>}
+                    </span>
                   </button>
                 );
               })}

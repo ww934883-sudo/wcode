@@ -108,6 +108,11 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX idx_provider_models_provider ON provider_models(provider, sort)`,
     ].join(";\n"),
   },
+  {
+    // 模型条目元数据（D+2s）：上下文窗口标注（如 "1M"/"200K"），选择器/设置页展示
+    id: "0004-provider-models-meta",
+    up: ["ALTER TABLE provider_models ADD COLUMN context_label TEXT"].join(";\n"),
+  },
 ];
 
 /** 应用全部未执行的迁移；幂等（已登记的 id 跳过），返回本次新应用的迁移 id */
