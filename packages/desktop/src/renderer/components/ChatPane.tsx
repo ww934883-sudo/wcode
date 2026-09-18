@@ -4,6 +4,7 @@ import type { PermissionDecision } from "@wcode/core";
 import type { PermissionAsk, PermissionMode, ThinkingLevel, ModelCatalogGroup } from "../../shared/protocol";
 import type { ChatItem, UiState } from "../state";
 import { Composer, type ComposerCommand } from "./Composer";
+import { DropdownSelect } from "./DropdownSelect";
 import { ModelSelect } from "./ModelSelect";
 import { ChatView } from "./ChatView";
 
@@ -95,18 +96,12 @@ export function ChatPane({
       projectName={pane.cwd.split(/[\\/]/).pop() || pane.cwd}
       toolbar={
         <>
-          <select
-            className="sel"
+          <DropdownSelect
             value={permissionMode}
+            options={PERMISSION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            onSelect={(v) => onPermissionMode(v as PermissionMode)}
             title="权限模式（新会话生效）"
-            onChange={(e) => onPermissionMode(e.target.value as PermissionMode)}
-          >
-            {PERMISSION_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          />
           {pane.ui.usage && (
             <span className="usage">
               ↑{pane.ui.usage.inputTokens} ↓{pane.ui.usage.outputTokens}
@@ -122,18 +117,12 @@ export function ChatPane({
             model={model}
             onSelect={onModel}
           />
-          <select
-            className="sel"
+          <DropdownSelect
             value={thinkingLevel}
+            options={THINKING_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            onSelect={(v) => onThinkingLevel(v as ThinkingLevel)}
             title="思考级别（下一轮请求生效）"
-            onChange={(e) => onThinkingLevel(e.target.value as ThinkingLevel)}
-          >
-            {THINKING_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          />
         </>
       }
     />
