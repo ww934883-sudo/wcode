@@ -123,28 +123,60 @@ export function SettingsPage({
             ))}
           </div>
           {showAdd ? (
-            <div className="settings-add">
-              <input
-                placeholder="名称（如 Kimi）"
-                value={addDraft.name}
-                onChange={(e) => setAddDraft((d) => ({ ...d, name: e.target.value }))}
-              />
-              <select
-                value={addDraft.type}
-                onChange={(e) => setAddDraft((d) => ({ ...d, type: e.target.value }))}
-              >
-                {TYPE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                placeholder="Base URL（可留空）"
-                value={addDraft.baseUrl}
-                onChange={(e) => setAddDraft((d) => ({ ...d, baseUrl: e.target.value }))}
-              />
-              <div className="settings-add-actions">
+            <button className="settings-add-btn" onClick={() => setShowAdd(false)}>
+              收起表单
+            </button>
+          ) : (
+            <button className="settings-add-btn" onClick={() => setShowAdd(true)}>
+              ＋ 添加供应商
+            </button>
+          )}
+        </aside>
+
+        {/* ── 右：选中供应商的详情配置；点击「添加供应商」时显示创建表单 ── */}
+        <section className="settings-detail">
+          {showAdd ? (
+            <div className="settings-create">
+              <h2 className="settings-name">添加供应商</h2>
+              <div className="settings-fields">
+                <label className="field">
+                  <span>名称</span>
+                  <div className="field-row">
+                    <input
+                      autoFocus
+                      placeholder="如 Kimi / Z.ai / 火山"
+                      value={addDraft.name}
+                      onChange={(e) => setAddDraft((d) => ({ ...d, name: e.target.value }))}
+                    />
+                  </div>
+                </label>
+                <label className="field">
+                  <span>API 格式</span>
+                  <div className="field-row">
+                    <select
+                      value={addDraft.type}
+                      onChange={(e) => setAddDraft((d) => ({ ...d, type: e.target.value }))}
+                    >
+                      {TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </label>
+                <label className="field">
+                  <span>Base URL（可留空，用该协议的默认地址）</span>
+                  <div className="field-row">
+                    <input
+                      placeholder="https://api.kimi.com/coding"
+                      value={addDraft.baseUrl}
+                      onChange={(e) => setAddDraft((d) => ({ ...d, baseUrl: e.target.value }))}
+                    />
+                  </div>
+                </label>
+              </div>
+              <div className="settings-create-actions">
                 <button
                   className="btn primary"
                   disabled={addDraft.name.trim() === ""}
@@ -168,15 +200,7 @@ export function SettingsPage({
               </div>
             </div>
           ) : (
-            <button className="settings-add-btn" onClick={() => setShowAdd(true)}>
-              ＋ 添加供应商
-            </button>
-          )}
-        </aside>
-
-        {/* ── 右：选中供应商的详情配置 ── */}
-        <section className="settings-detail">
-          {cur ? (
+            cur ? (
             <>
               <div className="settings-detail-head">
                 {renaming ? (
@@ -491,8 +515,9 @@ export function SettingsPage({
                 </div>
               </div>
             </>
-          ) : (
-            <div className="empty-hint">还没有供应商——点左侧「＋ 添加供应商」创建。</div>
+            ) : (
+              <div className="empty-hint">还没有供应商——点左侧「＋ 添加供应商」创建。</div>
+            )
           )}
           {err && <div className="foot-notice page-notice">{err}</div>}
           {info?.notice && !err && <div className="foot-notice page-notice">{info.notice}</div>}

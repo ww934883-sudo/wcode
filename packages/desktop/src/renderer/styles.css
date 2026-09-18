@@ -1008,6 +1008,11 @@ button {
   gap: 6px;
 }
 
+.settings-create-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .settings-add-btn {
   border-top: 1px solid var(--border);
   padding: 10px 6px 2px;
