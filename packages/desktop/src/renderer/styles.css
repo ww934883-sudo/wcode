@@ -1054,6 +1054,27 @@ button {
   gap: 8px;
 }
 
+.saved-flash {
+  color: var(--ok);
+  font-size: 12px;
+  animation: fade-in-out 1.5s ease forwards;
+}
+
+@keyframes fade-in-out {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 .rename-row {
   display: flex;
   align-items: center;

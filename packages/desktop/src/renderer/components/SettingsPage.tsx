@@ -105,7 +105,59 @@ export function SettingsPage({
     }
   };
 
+  // 自动保存成功后的短暂提示
+  const [savedFlash, setSavedFlash] = useState(false);
+  const flash = () => {
+    setSavedFlash(true);
+    window.setTimeout(() => setSavedFlash(false), 1500);
+  };
+
   const entries = catalog.find((g) => g.provider === cur?.name)?.models ?? [];
+
+  // Base URL：改动防抖自动保存（输入停顿 600ms 或失焦/回车）
+  useEffect(() => {
+    if (!cur || urlDraft === (cur.baseUrl ?? "")) return;
+    const t = window.setTimeout(() => {
+      void run(() => onUpdateProvider(cur.name, { baseUrl: urlDraft })).then((ok) => {
+        if (ok) flash();
+      });
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [urlDraft]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveKey = () => {
+    if (!cur || keyDraft === "" || keyDraft === keyOriginal) return;
+    void run(async () => {
+      await onSaveKey(cur.name, keyDraft);
+      setKeyOriginal(keyDraft);
+      flash();
+    });
+  };
+
+  // 模型编辑行：失焦即应用（两输入间切换不算离开），Esc 取消
+  const applyModelEdit = () => {
+    if (!cur || !editingModel) return;
+    const model = editDraft.model.trim() || editingModel;
+    const prev = entries.find((e) => e.model === editingModel);
+    const contextLabel = editDraft.contextLabel.trim() || null;
+    if (model === editingModel && contextLabel === (prev?.contextLabel ?? null)) {
+      setEditingModel(null);
+      return;
+    }
+    void run(async () => {
+      await onUpdateModel(cur.name, editingModel, { model, contextLabel });
+      setEditingModel(null);
+      flash();
+    });
+  };
+
+  const modelEditKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      (e.target as HTMLInputElement).blur();
+    }
+    if (e.key === "Escape") setEditingModel(null);
+  };
 
   const runTest = async (model: string) => {
     if (!cur) return;
@@ -367,6 +419,7 @@ export function SettingsPage({
                   </h2>
                 )}
                 <div className="settings-head-actions">
+                  {savedFlash && <span className="saved-flash">已保存</span>}
                   <span className={"chip " + (cur.enabled ? "ok" : "")}>
                     {cur.enabled ? "已启用" : "已禁用"}
                   </span>
@@ -409,20 +462,23 @@ export function SettingsPage({
 
               <div className="settings-fields">
                 <label className="field">
-                  <span>Base URL</span>
+                  <span>Base URL（修改后自动保存）</span>
                   <div className="field-row">
                     <input
                       value={urlDraft}
                       placeholder="https://api.kimi.com/coding"
                       onChange={(e) => setUrlDraft(e.target.value)}
+                      onBlur={() => {
+                        if (cur && urlDraft !== (cur.baseUrl ?? "")) {
+                          void run(() => onUpdateProvider(cur.name, { baseUrl: urlDraft })).then((ok) => {
+                            if (ok) flash();
+                          });
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
                     />
-                    <button
-                      className="btn"
-                      disabled={urlDraft === (cur.baseUrl ?? "")}
-                      onClick={() => void run(() => onUpdateProvider(cur.name, { baseUrl: urlDraft }))}
-                    >
-                      保存
-                    </button>
                   </div>
                 </label>
                 <label className="field">
@@ -441,13 +497,17 @@ export function SettingsPage({
                   </div>
                 </label>
                 <label className="field">
-                  <span>API Key</span>
+                  <span>API Key（回车或点击别处自动保存）</span>
                   <div className="field-row">
                     <input
                       type={keyVisible ? "text" : "password"}
                       placeholder={cur.hasKey ? "" : "sk-…"}
                       value={keyDraft}
                       onChange={(e) => setKeyDraft(e.target.value)}
+                      onBlur={saveKey}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
                     />
                     <button
                       className="icon-btn"
@@ -469,18 +529,6 @@ export function SettingsPage({
                         )}
                       </svg>
                     </button>
-                    <button
-                      className="btn primary"
-                      disabled={keyDraft === "" || keyDraft === keyOriginal}
-                      onClick={() =>
-                        void run(async () => {
-                          await onSaveKey(cur.name, keyDraft);
-                          setKeyOriginal(keyDraft);
-                        })
-                      }
-                    >
-                      保存
-                    </button>
                   </div>
                 </label>
               </div>
@@ -495,36 +543,27 @@ export function SettingsPage({
                   return (
                     <div key={e.model} className="model-row">
                       {editingModel === e.model ? (
-                        <span className="model-edit">
+                        <span
+                          className="model-edit"
+                          onBlur={(ev) => {
+                            // 两输入间切换（relatedTarget 仍在行内）不应用，整行失焦才应用
+                            if (!ev.currentTarget.contains(ev.relatedTarget as Node)) applyModelEdit();
+                          }}
+                        >
                           <input
                             value={editDraft.model}
                             autoFocus
                             placeholder="模型 id"
                             onChange={(ev) => setEditDraft((d) => ({ ...d, model: ev.target.value }))}
+                            onKeyDown={modelEditKeyDown}
                           />
                           <input
                             className="ctx-input"
                             value={editDraft.contextLabel}
                             placeholder="上下文（如 1M）"
                             onChange={(ev) => setEditDraft((d) => ({ ...d, contextLabel: ev.target.value }))}
+                            onKeyDown={modelEditKeyDown}
                           />
-                          <button
-                            className="btn primary"
-                            onClick={() =>
-                              void run(async () => {
-                                await onUpdateModel(cur.name, e.model, {
-                                  model: editDraft.model.trim() || e.model,
-                                  contextLabel: editDraft.contextLabel.trim() || null,
-                                });
-                                setEditingModel(null);
-                              })
-                            }
-                          >
-                            保存
-                          </button>
-                          <button className="btn" onClick={() => setEditingModel(null)}>
-                            取消
-                          </button>
                         </span>
                       ) : (
                         <>
