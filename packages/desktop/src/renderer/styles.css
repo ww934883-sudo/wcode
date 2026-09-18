@@ -855,7 +855,7 @@ button {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  width: min(320px, 80vw);
+  width: min(400px, 80vw);
   max-height: 300px;
   overflow-y: auto;
   background: var(--surface);
@@ -932,9 +932,20 @@ button {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 220px;
+  max-width: 360px;
   padding: 6px 24px 6px 10px;
   position: relative;
+}
+
+/* 表单列内的下拉与输入框同宽（如设置页 API 格式） */
+.field-row .dd-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-row .dd-select-btn {
+  width: 100%;
+  max-width: none;
 }
 
 .dd-select-label {
