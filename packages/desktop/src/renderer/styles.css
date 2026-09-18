@@ -1148,6 +1148,31 @@ button {
   margin: 16px 0 20px;
 }
 
+/* 设置页文本输入：与下拉按钮同视觉（高度/圆角/描边/聚焦高亮） */
+.settings-shell input {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  outline: none;
+  min-width: 0;
+}
+
+.settings-shell input::placeholder {
+  color: var(--text-3);
+}
+
+.settings-shell input:focus {
+  border-color: var(--accent);
+}
+
+.settings-shell input[type="password"] {
+  font-family: var(--mono);
+  letter-spacing: 2px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

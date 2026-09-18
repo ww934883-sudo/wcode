@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ModelCatalogGroup, RuntimeInfo } from "../../shared/protocol";
+import { DropdownSelect } from "./DropdownSelect";
 
 const TYPE_OPTIONS = [
   { value: "anthropic", label: "Anthropic Messages (/v1/messages)" },
@@ -222,16 +223,12 @@ export function SettingsPage({
                 <label className="field">
                   <span>API 格式</span>
                   <div className="field-row">
-                    <select
+                    <DropdownSelect
                       value={addDraft.type}
-                      onChange={(e) => setAddDraft((d) => ({ ...d, type: e.target.value }))}
-                    >
-                      {TYPE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                      options={TYPE_OPTIONS}
+                      onSelect={(v) => setAddDraft((d) => ({ ...d, type: v }))}
+                      title="接口协议规范"
+                    />
                   </div>
                 </label>
                 <label className="field">
@@ -482,18 +479,14 @@ export function SettingsPage({
                   </div>
                 </label>
                 <label className="field">
-                  <span>API 格式</span>
+                  <span>API 格式（选择即保存）</span>
                   <div className="field-row">
-                    <select
+                    <DropdownSelect
                       value={cur.type}
-                      onChange={(e) => void run(() => onUpdateProvider(cur.name, { type: e.target.value }))}
-                    >
-                      {TYPE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                      options={TYPE_OPTIONS}
+                      onSelect={(v) => void run(() => onUpdateProvider(cur.name, { type: v }))}
+                      title="接口协议规范"
+                    />
                   </div>
                 </label>
                 <label className="field">
