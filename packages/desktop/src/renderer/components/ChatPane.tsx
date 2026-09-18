@@ -110,7 +110,15 @@ export function ChatPane({
               title="模型（即时切换，空闲会话生效）"
               onChange={(e) => onModel(e.target.value)}
             >
-              {(models.length > 0 ? models : [model]).map((m) => (
+              {/* 配置中的模型 id 可能带日期后缀差异（如 glm-5.3-flash vs
+                  glm-5-3-flash-260828）：不在列表时补在首位，
+                  保证下拉定位到当前模型而不是空选中态 */}
+              {(models.length > 0
+                ? models.includes(model)
+                  ? models
+                  : [model, ...models]
+                : [model]
+              ).map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
