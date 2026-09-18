@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PermissionDecision } from "@wcode/core";
-import type { PermissionAsk, RuntimeInfo, SearchHitEntry, ModelCatalogGroup } from "../shared/protocol";
+import {
+  ALL_THINKING_LEVELS,
+  type PermissionAsk,
+  type RuntimeInfo,
+  type SearchHitEntry,
+  type ModelCatalogGroup,
+} from "../shared/protocol";
 import type { MentionItem, MentionTrigger } from "./components/Composer";
 import { ChatPane, type PaneState } from "./components/ChatPane";
 import type { ComposerCommand } from "./components/Composer";
@@ -227,6 +233,11 @@ export function App() {
     { id: "settings", label: "设置", aliases: ["settings"] },
   ];
 
+  /** 当前模型不支持思考时收敛思考命令（与选择器同语义；主进程侧另有守卫兜底） */
+  const visibleCommands = COMMANDS.filter(
+    (c) => !c.id.startsWith("thinking-") || (info?.thinkingLevels ?? ALL_THINKING_LEVELS).length > 0,
+  );
+
   /** $ / @ 引用候选：技能走 info；插件 + 项目文件走 bridge（文件由主进程扫描 cwd） */
   const resolveMentions = async (
     trigger: MentionTrigger,
@@ -361,6 +372,7 @@ export function App() {
             model={info?.model ?? ""}
             permissionMode={info?.permissionMode ?? "default"}
             thinkingLevel={info?.thinkingLevel ?? "medium"}
+            thinkingLevels={info?.thinkingLevels ?? ALL_THINKING_LEVELS}
             active={panes.length > 1 && idx === activePane}
             onActivate={() => setActivePane(idx)}
             onSend={(text) => void send(idx, text)}
@@ -376,7 +388,7 @@ export function App() {
             onThinkingLevel={(l) => bridge.setThinkingLevel(l)}
             onPickFolder={() => void pickFolder()}
             onOpenSettings={() => setView("settings")}
-            commands={COMMANDS}
+            commands={visibleCommands}
             onCommand={runCommand}
             resolveMentions={resolveMentions}
           />

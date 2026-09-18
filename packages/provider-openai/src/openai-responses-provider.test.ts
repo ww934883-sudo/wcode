@@ -209,3 +209,26 @@ describe("思考级别映射（reasoning.effort）", () => {
     expect(await capturedBody("high")).toMatchObject({ reasoning: { effort: "high" } });
   });
 });
+
+describe("思考能力声明", () => {
+  it("thinkingLevels 与 Chat 同一族判断", () => {
+    const levels = (model: string) =>
+      new OpenAIResponsesProvider({ apiKey: "k", model }).thinkingLevels();
+    expect(levels("gpt-4o")).toEqual([]);
+    expect(levels("gpt-5")).toEqual(["off", "low", "medium", "high"]);
+  });
+
+  it("不支持的模型即使请求 thinking: high 也不发 reasoning", async () => {
+    let body: Record<string, unknown> = {};
+    const provider = new OpenAIResponsesProvider({
+      apiKey: "k",
+      model: "gpt-4o",
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return sseResponse('data: {"type":"response.completed","response":{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}}\n\n');
+      }) as typeof fetch,
+    });
+    await collect(provider, { ...baseReq(), thinking: "high" });
+    expect(body).not.toHaveProperty("reasoning");
+  });
+});

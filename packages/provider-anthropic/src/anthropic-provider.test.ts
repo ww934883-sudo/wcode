@@ -274,3 +274,33 @@ describe("思考级别映射", () => {
     expect(high.max_tokens).toBe(33792);
   });
 });
+
+describe("思考能力声明", () => {
+  it("thinkingLevels 按模型族收敛：3.7 之前不支持，3.7+/4 系与未知模型全档", () => {
+    const levels = (model: string) =>
+      new AnthropicProvider({ apiKey: "k", model }).thinkingLevels();
+    expect(levels("claude-3-5-sonnet-20241022")).toEqual([]);
+    expect(levels("claude-3-opus-20240229")).toEqual([]);
+    expect(levels("claude-2.1")).toEqual([]);
+    expect(levels("claude-3-7-sonnet-20250219")).toEqual(["off", "low", "medium", "high"]);
+    expect(levels("claude-sonnet-4-5")).toEqual(["off", "low", "medium", "high"]);
+    // 火山等兼容层的自定义模型名按支持处理（与未做能力判断前的行为一致）
+    expect(levels("glm-4.6")).toEqual(["off", "low", "medium", "high"]);
+  });
+
+  it("不支持的模型即使请求 thinking: high 也不发 thinking 字段", async () => {
+    let body: Record<string, unknown> = {};
+    const provider = new AnthropicProvider({
+      apiKey: "k",
+      model: "claude-3-5-haiku-20241022",
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return sseResponse('data: {"type":"message_stop"}\n\n');
+      }) as typeof fetch,
+    });
+    for await (const _ev of provider.stream({ ...baseReq(), thinking: "high" })) {
+      /* 消费即触发请求 */
+    }
+    expect(body).not.toHaveProperty("thinking");
+  });
+});

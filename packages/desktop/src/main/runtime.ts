@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   AgentSession,
+  ALL_THINKING_LEVELS,
   PermissionEngine,
   ToolRegistry,
   buildSystemPrompt,
@@ -120,6 +121,7 @@ export class DesktopRuntime {
     this.model = this.mode === "real" ? (this.config?.model ?? "") : (DEMO_MODELS[0] ?? "wcode-demo");
     if (this.mode === "real") {
       this.realProvider = this.buildRealProvider(this.model);
+      this.syncThinkingCapability();
     }
     await this.refreshDiscoveries();
     await this.rebuildRegistry();
@@ -211,6 +213,19 @@ export class DesktopRuntime {
       return new ScriptedProvider(buildDemoTurns(cwd));
     }
     return this.realProvider ?? this.buildRealProvider(this.model);
+  }
+
+  /** 当前模型的思考档位（provider 声明能力）；未声明/演示模式按全档（与旧行为一致） */
+  private currentThinkingLevels(): ThinkingLevel[] {
+    return this.realProvider?.thinkingLevels?.() ?? [...ALL_THINKING_LEVELS];
+  }
+
+  /** 模型/供应商切换后同步思考能力：新模型不支持思考时自动关档并提示 */
+  private syncThinkingCapability(): void {
+    if (this.currentThinkingLevels().length === 0 && this.thinkingLevel !== "off") {
+      this.setThinkingLevel("off");
+      this.notice = "当前模型不支持思考参数，思考级别已自动关闭";
+    }
   }
 
   /** MCP：真实模式连接启用的 server；失败降级为问题清单不阻塞启动 */
@@ -660,6 +675,7 @@ export class DesktopRuntime {
     if (this.mode === "real") {
       try {
         this.realProvider = this.buildRealProvider(this.model);
+        this.syncThinkingCapability();
       } catch {
         // 删掉的是当前供应商且无可用配置：保持旧 provider 对象，设置页会提示缺 key
       }
@@ -789,6 +805,7 @@ export class DesktopRuntime {
             desk.provider = this.realProvider;
           }
         }
+        this.syncThinkingCapability();
       } catch (err) {
         this.notice = `模型切换失败（${errorMessage(err)}）`;
       }
@@ -809,6 +826,12 @@ export class DesktopRuntime {
 
   /** 思考级别即时生效：下一轮请求就带新预算（AgentSession 内是纯请求字段，运行中也安全） */
   setThinkingLevel(level: ThinkingLevel): void {
+    // 能力守卫：当前模型不支持思考参数时拒绝开档（UI 选择器已禁用，这里兜斜杠命令）
+    if (this.currentThinkingLevels().length === 0 && level !== "off") {
+      this.notice = "当前模型不支持思考参数";
+      this.opts.cb.onInfo();
+      return;
+    }
     this.thinkingLevel = level;
     for (const desk of this.sessions.values()) {
       desk.session.setThinkingLevel(level);
@@ -955,6 +978,7 @@ export class DesktopRuntime {
       for (const desk of this.sessions.values()) {
         if (!desk.running) desk.session.setProvider(this.realProvider);
       }
+      this.syncThinkingCapability();
     } catch (err) {
       this.notice = `服务商重建失败（${errorMessage(err)}）`;
     }
@@ -1013,6 +1037,7 @@ export class DesktopRuntime {
       contextTokens: this.contextTokens,
       permissionMode: this.permissionMode,
       thinkingLevel: this.thinkingLevel,
+      thinkingLevels: this.currentThinkingLevels(),
       persona: this.persona,
       currentCwd: this.currentCwd,
       projects,

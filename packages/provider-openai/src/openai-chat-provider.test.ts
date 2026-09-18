@@ -262,3 +262,31 @@ describe("思考级别映射（reasoning_effort）", () => {
     expect(await capturedBody("high")).toMatchObject({ reasoning_effort: "high" });
   });
 });
+
+describe("思考能力声明", () => {
+  it("thinkingLevels 按模型族收敛：gpt-3/4 系不支持，o 系/gpt-5/未知模型全档", () => {
+    const levels = (model: string) =>
+      new OpenAIChatProvider({ apiKey: "k", model }).thinkingLevels();
+    expect(levels("gpt-4o")).toEqual([]);
+    expect(levels("gpt-4.1-mini")).toEqual([]);
+    expect(levels("chatgpt-4o-latest")).toEqual([]);
+    expect(levels("o3")).toEqual(["off", "low", "medium", "high"]);
+    expect(levels("gpt-5")).toEqual(["off", "low", "medium", "high"]);
+    // DeepSeek/GLM 等第三方按支持处理（与未做能力判断前的行为一致）
+    expect(levels("deepseek-chat")).toEqual(["off", "low", "medium", "high"]);
+  });
+
+  it("不支持的模型即使请求 thinking: high 也不发 reasoning_effort", async () => {
+    let body: Record<string, unknown> = {};
+    const provider = new OpenAIChatProvider({
+      apiKey: "k",
+      model: "gpt-4o",
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return sseResponse('data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+      }) as typeof fetch,
+    });
+    await collect(provider, { ...baseReq(), thinking: "high" });
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+});

@@ -8,17 +8,20 @@ export interface DropdownOption {
 /**
  * 通用下拉选择（与模型选择器同视觉语言）：单行按钮 + 向上弹出的选项列表。
  * 选项弹层复用 .model-dd / .model-dd-item 样式。
+ * disabled 时按钮不可点且降低透明度，弹层不展开。
  */
 export function DropdownSelect({
   value,
   options,
   onSelect,
   title,
+  disabled,
 }: {
   value: string;
   options: DropdownOption[];
   onSelect: (value: string) => void;
   title?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -39,6 +42,8 @@ export function DropdownSelect({
       <button
         type="button"
         className="sel dd-select-btn"
+        style={disabled ? { opacity: 0.45 } : undefined}
+        disabled={disabled}
         title={title ?? current?.label}
         onClick={() => setOpen((v) => !v)}
       >

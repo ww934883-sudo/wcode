@@ -4,6 +4,13 @@ import type { AgentEvent, Message, ModelCatalogGroup, PermissionDecision, Thinki
 export type { ThinkingLevel };
 export type { ModelCatalogGroup };
 
+/**
+ * 与 core 的 ALL_THINKING_LEVELS 同步维护。渲染层不允许 value-import @wcode/core：
+ * core 的 index 会把 node:fs/path 链进浏览器 bundle（vite 构建直接失败），
+ * 渲染层对 core 只做 type 导入。
+ */
+export const ALL_THINKING_LEVELS: ThinkingLevel[] = ["off", "low", "medium", "high"];
+
 export type PermissionMode = "plan" | "default" | "acceptEdits" | "bypass";
 
 export interface SessionEntry {
@@ -139,6 +146,8 @@ export interface RuntimeInfo {
   contextTokens: number;
   permissionMode: PermissionMode;
   thinkingLevel: ThinkingLevel;
+  /** 当前模型支持的思考档位（provider 声明；未知按全档；空数组 = 不支持） */
+  thinkingLevels: ThinkingLevel[];
   /** 当前选中的助理（自定义 Agent），null = 默认 */
   persona: string | null;
   currentCwd: string;

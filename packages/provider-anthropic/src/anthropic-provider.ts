@@ -8,7 +8,7 @@ import type {
   ToolCall,
   ToolDef,
 } from "@wcode/core";
-import { AbortedError, isAbortedError, ProviderError } from "@wcode/core";
+import { AbortedError, isAbortedError, ALL_THINKING_LEVELS, ProviderError } from "@wcode/core";
 
 export interface AnthropicProviderOptions {
   apiKey: string;
@@ -45,6 +45,17 @@ export function thinkingBudget(level: ThinkingLevel | undefined): number | undef
 }
 
 /**
+ * 扩展思考的模型族判断（Claude 3.7 Sonnet 起支持）：更早的 Claude 模型发
+ * thinking 字段会被官方端点 400。未知模型名（火山等兼容层的自定义 id）
+ * 一律按支持处理——与未做能力判断前的行为一致。
+ */
+const PRE_THINKING_PATTERN = /^claude-(2(\.\d+)?|instant|3-opus|3-sonnet|3-haiku|3-5-)/;
+
+export function extendedThinkingSupported(model: string): boolean {
+  return !PRE_THINKING_PATTERN.test(model);
+}
+
+/**
  * Anthropic Messages 协议适配（架构文档 §2.2 / §14）：
  * 归一化类型 ↔ 线格式翻译 + SSE 流解析。思维链字段不回传；
  * 错误只翻译成 ProviderError{retryable}，重试节奏由 core 决定。
@@ -69,7 +80,11 @@ export class AnthropicProvider implements ModelProvider {
   }
 
   async *stream(req: ModelRequest): AsyncIterable<StreamEvent> {
-    const budget = thinkingBudget(req.thinking);
+    // 线上兜底：已知不支持扩展思考的模型不发 thinking 字段（切模型后 session
+    // 可能仍持有旧档位，UI 守卫之外在这里保证不出 400）
+    const budget = extendedThinkingSupported(this.model)
+      ? thinkingBudget(req.thinking)
+      : undefined;
     const baseMax = Math.min(req.maxTokens, this.maxTokens);
     const body = {
       model: this.model,
@@ -199,6 +214,13 @@ export class AnthropicProvider implements ModelProvider {
       type: "message_complete",
       response: { stopReason, text, toolCalls, usage },
     };
+  }
+
+  /** 可选能力声明（port.thinkingLevels）：3.7 之前的老模型不支持扩展思考 */
+  thinkingLevels(): ThinkingLevel[] {
+    return extendedThinkingSupported(this.model)
+      ? [...ALL_THINKING_LEVELS]
+      : [];
   }
 
   /** GET /v1/models（官方分页上限内单页取全）；网关不支持时抛 ProviderError */

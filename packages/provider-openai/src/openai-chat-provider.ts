@@ -8,7 +8,7 @@ import type {
   ToolCall,
   ToolDef,
 } from "@wcode/core";
-import { AbortedError, isAbortedError, ProviderError } from "@wcode/core";
+import { AbortedError, isAbortedError, ALL_THINKING_LEVELS, ProviderError } from "@wcode/core";
 import { describe, iterateSseData, toOpenAIProviderError } from "./sse";
 
 export interface OpenAIChatProviderOptions {
@@ -32,6 +32,18 @@ export function reasoningEffort(
   level: ThinkingLevel | undefined,
 ): "low" | "medium" | "high" | undefined {
   return level && level !== "off" ? level : undefined;
+}
+
+/**
+ * 推理参数的模型族判断：gpt-3.x / gpt-4 系（含 4o/4.1/4.5）与 chatgpt-* 不支持
+ * reasoning_effort，发了轻则被忽略重则被网关 400。o 系与 gpt-5 系支持；未知
+ * 模型名（DeepSeek/GLM 等第三方）按支持处理——与未做能力判断前的行为一致。
+ * 已知限制：gpt-5 的 minimal/none 档位超出 core 的 ThinkingLevel 枚举，暂不表达。
+ */
+const NON_REASONING_PATTERN = /^(gpt-3|gpt-4|chatgpt)/;
+
+export function reasoningSupported(model: string): boolean {
+  return !NON_REASONING_PATTERN.test(model);
 }
 
 /**
@@ -65,7 +77,9 @@ export class OpenAIChatProvider implements ModelProvider {
       // 让服务端在流末尾单独发 usage 块（部分网关缺省不发）
       stream_options: { include_usage: true },
     };
-    const effort = reasoningEffort(req.thinking);
+    // 线上兜底：已知不支持推理参数的模型不发 reasoning_effort（切模型后
+    // session 可能仍持有旧档位，UI 守卫之外在这里保证不出 400）
+    const effort = reasoningSupported(this.model) ? reasoningEffort(req.thinking) : undefined;
     if (effort) body.reasoning_effort = effort;
     if (req.tools.length > 0) {
       body.tools = toChatTools(req.tools);
@@ -169,6 +183,11 @@ export class OpenAIChatProvider implements ModelProvider {
       type: "message_complete",
       response: { stopReason, text, toolCalls, usage },
     };
+  }
+
+  /** 可选能力声明（port.thinkingLevels）：gpt-3.x/4 系不支持推理参数 */
+  thinkingLevels(): ThinkingLevel[] {
+    return reasoningSupported(this.model) ? [...ALL_THINKING_LEVELS] : [];
   }
 
   /** GET /models；status 标记为 Shutdown（已下线）的条目过滤掉 */

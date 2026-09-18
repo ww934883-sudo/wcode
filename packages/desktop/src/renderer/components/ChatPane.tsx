@@ -42,6 +42,7 @@ export function ChatPane({
   model,
   permissionMode,
   thinkingLevel,
+  thinkingLevels,
   active,
   onActivate,
   onSend,
@@ -65,6 +66,8 @@ export function ChatPane({
   model: string;
   permissionMode: PermissionMode;
   thinkingLevel: ThinkingLevel;
+  /** 当前模型支持的思考档位（provider 声明；空 = 不支持，选择器禁用） */
+  thinkingLevels: readonly ThinkingLevel[];
   /** 分屏时的激活面板（单面板恒 false） */
   active: boolean;
   onActivate: () => void;
@@ -129,9 +132,17 @@ export function ChatPane({
           />
           <DropdownSelect
             value={thinkingLevel}
-            options={THINKING_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            options={
+              thinkingLevels.length > 0
+                ? THINKING_OPTIONS.filter((o) => thinkingLevels.includes(o.value)).map((o) => ({
+                    value: o.value,
+                    label: o.label,
+                  }))
+                : [{ value: thinkingLevel, label: "思考: 不可用" }]
+            }
             onSelect={(v) => onThinkingLevel(v as ThinkingLevel)}
-            title="思考级别（下一轮请求生效）"
+            disabled={thinkingLevels.length === 0}
+            title={thinkingLevels.length === 0 ? "当前模型不支持思考参数" : "思考级别（下一轮请求生效）"}
           />
         </>
       }

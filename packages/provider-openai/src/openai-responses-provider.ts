@@ -9,9 +9,9 @@ import type {
   ToolDef,
   Usage,
 } from "@wcode/core";
-import { AbortedError, isAbortedError, ProviderError } from "@wcode/core";
+import { AbortedError, isAbortedError, ALL_THINKING_LEVELS, ProviderError } from "@wcode/core";
 import { describe, iterateSseData, toOpenAIProviderError } from "./sse";
-import { reasoningEffort } from "./openai-chat-provider";
+import { reasoningEffort, reasoningSupported } from "./openai-chat-provider";
 
 export interface OpenAIResponsesProviderOptions {
   apiKey: string;
@@ -76,8 +76,9 @@ export class OpenAIResponsesProvider implements ModelProvider {
       max_output_tokens: Math.min(req.maxTokens, this.maxTokens),
       stream: true,
     };
-    // Responses 协议的思考参数是 reasoning:{effort}（与 Chat 的 reasoning_effort 同源映射）
-    const effort = reasoningEffort(req.thinking);
+    // Responses 协议的思考参数是 reasoning:{effort}（与 Chat 的 reasoning_effort 同源映射）；
+    // 线上兜底：已知不支持推理参数的模型不发 reasoning
+    const effort = reasoningSupported(this.model) ? reasoningEffort(req.thinking) : undefined;
     if (effort) body.reasoning = { effort };
     if (req.tools.length > 0) {
       body.tools = toResponsesTools(req.tools);
@@ -181,6 +182,11 @@ export class OpenAIResponsesProvider implements ModelProvider {
       type: "message_complete",
       response: { stopReason, text, toolCalls, usage },
     };
+  }
+
+  /** 可选能力声明（port.thinkingLevels）：与 Chat 同一族判断 */
+  thinkingLevels(): ThinkingLevel[] {
+    return reasoningSupported(this.model) ? [...ALL_THINKING_LEVELS] : [];
   }
 
   /** GET /models（与 Chat Completions 同一目录端点）；过滤 Shutdown */

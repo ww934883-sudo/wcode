@@ -1,19 +1,29 @@
 import type { AgentEvent, Message, PermissionDecision } from "@wcode/core";
-import type {
-  AutomationEntry,
-  AutomationRunEntry,
-  AutomationSpecInput,
-  PermissionAsk,
-  PermissionMode,
-  RuntimeInfo,
-  SearchHitEntry,
-  ThinkingLevel,
-  WcodeBridge,
+import {
+  ALL_THINKING_LEVELS,
+  type AutomationEntry,
+  type AutomationRunEntry,
+  type AutomationSpecInput,
+  type PermissionAsk,
+  type PermissionMode,
+  type RuntimeInfo,
+  type SearchHitEntry,
+  type ThinkingLevel,
+  type WcodeBridge,
 } from "../shared/protocol";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const DEMO_MODELS = ["claude-sonnet-4-6", "glm-5.3-flash", "deepseek-v3"];
+const DEMO_MODELS = ["claude-sonnet-4-6", "glm-5.3-flash", "deepseek-v3", "gpt-4o"];
 const CWD = "D:/demo-workspace";
+
+// 预览用能力表：模拟 provider.thinkingLevels 的家族判断，
+// 刻意含一个不支持思考的模型（gpt-4o）以验证选择器禁用态
+const MOCK_THINKING_LEVELS = new Map<string, ThinkingLevel[]>([
+  ["claude-sonnet-4-6", [...ALL_THINKING_LEVELS]],
+  ["glm-5.3-flash", [...ALL_THINKING_LEVELS]],
+  ["deepseek-v3", [...ALL_THINKING_LEVELS]],
+  ["gpt-4o", []],
+]);
 
 /**
  * 浏览器预览模式：window.wcode 缺失时在页内回放演示叙事（与主进程
@@ -39,6 +49,7 @@ export function createMockBridge(): WcodeBridge {
   const mockCatalog = new Map<string, Map<string, string | null>>([
     ["anthropic", new Map([["claude-sonnet-4-6", "200K"]])],
     ["zhipu", new Map([["glm-5.3-flash", "1M"], ["deepseek-v3", "128K"]])],
+    ["openai", new Map([["gpt-4o", "128K"]])],
   ]);
   const mockProviders: {
     name: string;
@@ -49,10 +60,14 @@ export function createMockBridge(): WcodeBridge {
   }[] = [
     { name: "anthropic", type: "anthropic", hasKey: false, enabled: true, baseUrl: "https://api.anthropic.com" },
     { name: "zhipu", type: "openai-compatible", hasKey: true, enabled: true, baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+    { name: "openai", type: "openai-responses", hasKey: false, enabled: true, baseUrl: "https://api.openai.com/v1" },
   ];
   let contextTokens = 200_000;
   let permissionMode: PermissionMode = "default";
   let thinkingLevel: ThinkingLevel = "medium";
+  // 与主进程同语义：未列入能力表的模型按全档（未知 = 与旧行为一致）
+  const levelsFor = (m: string): ThinkingLevel[] =>
+    MOCK_THINKING_LEVELS.get(m) ?? [...ALL_THINKING_LEVELS];
   let persona: string | null = null;
   let mcpConnected = true;
   // 浏览器预览的用户级 MCP 配置（模拟 settings.json 的 mcpServers 节）
@@ -114,6 +129,7 @@ export function createMockBridge(): WcodeBridge {
       contextTokens,
       permissionMode,
       thinkingLevel,
+      thinkingLevels: levelsFor(model),
       persona,
       currentCwd: CWD,
       projects,
@@ -355,6 +371,10 @@ export function createMockBridge(): WcodeBridge {
     selectModel: async (provider, m) => {
       activeProvider = provider;
       model = m;
+      if (levelsFor(m).length === 0 && thinkingLevel !== "off") {
+        thinkingLevel = "off";
+        notice = "当前模型不支持思考参数，思考级别已自动关闭";
+      }
       bump();
     },
     addProvider: async (name, opts) => {
@@ -414,6 +434,10 @@ export function createMockBridge(): WcodeBridge {
     },
     setModel: async (m) => {
       model = m;
+      if (levelsFor(m).length === 0 && thinkingLevel !== "off") {
+        thinkingLevel = "off";
+        notice = "当前模型不支持思考参数，思考级别已自动关闭";
+      }
       bump();
     },
     setContextTokens: async (tokens) => {
@@ -425,6 +449,11 @@ export function createMockBridge(): WcodeBridge {
       bump();
     },
     setThinkingLevel: async (l) => {
+      if (levelsFor(model).length === 0 && l !== "off") {
+        notice = "当前模型不支持思考参数";
+        bump();
+        return;
+      }
       thinkingLevel = l;
       bump();
     },
