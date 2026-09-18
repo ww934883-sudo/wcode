@@ -49,8 +49,11 @@ export function ModelSelect({
         title="模型（按供应商分组，点击选择）"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="model-select-provider">{provider}</span>
-        <span className="model-select-model">{model}</span>
+        <span className="model-select-line">
+          <span className="model-select-provider">{provider}</span>
+          <span className="model-select-slash">/</span>
+          <span className="model-select-model">{model}</span>
+        </span>
         <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
           <path
             d="M6 9l6 6 6-6"

@@ -803,33 +803,44 @@ button {
 
 .model-select-btn {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  max-width: 220px;
-  padding: 3px 22px 3px 10px;
-  line-height: 1.25;
+  max-width: 240px;
+  padding: 6px 24px 6px 10px;
   position: relative;
 }
 
-.model-select-provider {
-  font-size: 10.5px;
-  color: var(--text-3);
+/* 单行「供应商/模型」 */
+.model-select-line {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-select-provider {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+
+.model-select-slash {
+  color: var(--text-3);
+  flex: 0 0 auto;
 }
 
 .model-select-model {
   font-size: 12px;
   font-weight: 500;
   font-family: var(--mono);
-  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .model-select-btn svg {
@@ -1943,9 +1954,17 @@ button {
 
 .composer-foot {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 底部右侧组：模型 / 思考 / 发送 依次等间距靠右 */
+.composer-trailing {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .composer-foot .modes {

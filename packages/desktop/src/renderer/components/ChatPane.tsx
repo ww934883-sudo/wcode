@@ -107,6 +107,15 @@ export function ChatPane({
               </option>
             ))}
           </select>
+          {pane.ui.usage && (
+            <span className="usage">
+              ↑{pane.ui.usage.inputTokens} ↓{pane.ui.usage.outputTokens}
+            </span>
+          )}
+        </>
+      }
+      trailing={
+        <>
           <ModelSelect
             catalog={catalog}
             provider={providerName}
@@ -125,11 +134,6 @@ export function ChatPane({
               </option>
             ))}
           </select>
-          {pane.ui.usage && (
-            <span className="usage">
-              ↑{pane.ui.usage.inputTokens} ↓{pane.ui.usage.outputTokens}
-            </span>
-          )}
         </>
       }
     />

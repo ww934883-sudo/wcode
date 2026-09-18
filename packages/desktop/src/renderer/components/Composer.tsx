@@ -13,6 +13,7 @@ export function Composer({
   onSend,
   onAbort,
   toolbar,
+  trailing,
   projectName,
   commands,
   onCommand,
@@ -20,8 +21,10 @@ export function Composer({
   running: boolean;
   onSend: (text: string) => void;
   onAbort: () => void;
-  /** 输入卡底部工具行（模型/思考级别等选择器） */
+  /** 输入卡底部左侧工具（权限模式等） */
   toolbar?: ReactNode;
+  /** 输入卡底部右侧组（模型/思考，与发送按钮等间距排列） */
+  trailing?: ReactNode;
   /** 项目名：显示在输入卡上方 */
   projectName?: string;
   /** 斜杠命令面板（提供后输入 / 唤起） */
@@ -133,20 +136,23 @@ export function Composer({
         />
         <div className="composer-foot">
           {toolbar}
-          {running ? (
-            <button className="send-btn stop" title="停止" onClick={onAbort}>
-              ■
-            </button>
-          ) : (
-            <button
-              className="send-btn"
-              title="发送"
-              disabled={text.trim() === ""}
-              onClick={submit}
-            >
-              ↑
-            </button>
-          )}
+          <div className="composer-trailing">
+            {trailing}
+            {running ? (
+              <button className="send-btn stop" title="停止" onClick={onAbort}>
+                ■
+              </button>
+            ) : (
+              <button
+                className="send-btn"
+                title="发送"
+                disabled={text.trim() === ""}
+                onClick={submit}
+              >
+                ↑
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
