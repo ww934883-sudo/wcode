@@ -937,6 +937,14 @@ button {
   position: relative;
 }
 
+.dd-select-btn svg {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+}
+
 /* 表单列内的下拉与输入框同宽（如设置页 API 格式） */
 .field-row .dd-select {
   flex: 1;
