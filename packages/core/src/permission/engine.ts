@@ -1,6 +1,7 @@
 import {
   extractRuleArg,
   globMatch,
+  globMatchCommand,
   type Rule,
 } from "./rules";
 
@@ -8,6 +9,9 @@ export type PermissionMode = "plan" | "default" | "acceptEdits" | "bypass";
 
 /** 文件编辑类工具：acceptEdits 模式下自动放行的范围（其余变更类仍需确认） */
 const EDIT_TOOLS = new Set(["edit", "write", "notebookedit"]);
+
+/** 命令串工具：规则 pattern 匹配的是命令而非路径，* 需跨 /（git * 要命中 git add src/app.ts） */
+const COMMAND_TOOLS = new Set(["bash"]);
 
 export interface PermissionEvalContext {
   toolName: string;
@@ -28,17 +32,26 @@ export interface PermissionEngineOptions {
 
 /**
  * 权限判定优先级（架构文档 §3.5）：
- *   deny（config+session）> allow（config）> allowAlways（session）> 模式默认值
- * allowAlways 永远不能越过 deny；plan 模式只放行只读。
+ *   deny（config+session）> plan 硬上限 > allow（config）> allowAlways（session）> 模式默认值
+ * allowAlways 永远不能越过 deny；plan 模式是硬上限，allow 规则也只能放行只读操作。
  */
 export class PermissionEngine {
   private readonly configRules: Rule[];
   private readonly sessionRules: Rule[] = [];
-  readonly mode: PermissionMode;
+  private _mode: PermissionMode;
 
   constructor(opts: PermissionEngineOptions = {}) {
     this.configRules = opts.rules ?? [];
-    this.mode = opts.mode ?? "default";
+    this._mode = opts.mode ?? "default";
+  }
+
+  get mode(): PermissionMode {
+    return this._mode;
+  }
+
+  /** 运行期切换模式（桌面端模式选择器）：就地生效，会话 allowAlways 规则保留 */
+  setMode(mode: PermissionMode): void {
+    this._mode = mode;
   }
 
   addSessionRule(rule: Rule): void {
@@ -53,6 +66,10 @@ export class PermissionEngine {
     );
     if (deny) return { decision: "deny", reason: `命中拒绝规则 ${describe(deny)}` };
 
+    if (this.mode === "plan" && !ctx.isReadOnly) {
+      return { decision: "deny", reason: "plan 模式只允许只读操作" };
+    }
+
     const configAllow = this.matchRule(this.configRules, "allow", ctx);
     if (configAllow) return { decision: "allow" };
 
@@ -60,11 +77,6 @@ export class PermissionEngine {
     if (sessionAllow) return { decision: "allow" };
 
     if (this.mode === "bypass") return { decision: "allow" };
-    if (this.mode === "plan") {
-      return ctx.isReadOnly
-        ? { decision: "allow" }
-        : { decision: "deny", reason: "plan 模式只允许只读操作" };
-    }
     if (ctx.isReadOnly) return { decision: "allow" };
     if (this.mode === "acceptEdits" && EDIT_TOOLS.has(ctx.toolName.toLowerCase())) {
       return { decision: "allow" };
@@ -77,6 +89,9 @@ export class PermissionEngine {
     action: "allow" | "deny",
     ctx: PermissionEvalContext,
   ): Rule | undefined {
+    const glob = COMMAND_TOOLS.has(ctx.toolName.toLowerCase())
+      ? (p: string, c: string) => globMatch(p, c) || globMatchCommand(p, c)
+      : globMatch;
     return rules.find(
       (r) =>
         r.action === action &&
@@ -87,8 +102,8 @@ export class PermissionEngine {
             // 候选串可能是 "tool(arg)" 或裸 "arg"，两种形态都试
             const arg = extractRuleArg(p);
             return (
-              globMatch(r.pattern as string, arg) ||
-              globMatch(r.pattern as string, p)
+              glob(r.pattern as string, arg) ||
+              glob(r.pattern as string, p)
             );
           })),
     );

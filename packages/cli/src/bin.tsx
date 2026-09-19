@@ -111,7 +111,7 @@ async function main(): Promise<number> {
   const host = new InkHost();
 
   try {
-    const { session, config, skills, provider, cwd, sessions, registry, log } =
+    const { session, config, skills, commands, provider, cwd, sessions, registry, log } =
       await bootstrap({ host, overrides, resume });
     host.pushHistory({
       kind: "welcome",
@@ -133,6 +133,8 @@ async function main(): Promise<number> {
     const commandDeps: CommandDeps = {
       session,
       skills,
+      commands,
+      cwd,
       config,
       provider,
       // 动态读 commandDeps.config：/reload 后配置对象会整体替换
@@ -173,6 +175,8 @@ async function main(): Promise<number> {
         return {
           config: snap.config,
           skills: snap.skills,
+          commands: snap.commands,
+          plugins: snap.plugins,
           problems: snap.problems,
           registry: snap.registry,
         };

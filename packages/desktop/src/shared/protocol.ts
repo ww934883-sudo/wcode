@@ -38,6 +38,16 @@ export interface SearchHitEntry {
   excerpt: string;
 }
 
+/** 附件（补充上下文）：file = 磁盘文件（主进程按 path 读取）；text = 粘贴长文整段转存 */
+export interface AttachmentPayload {
+  name: string;
+  kind: "file" | "text";
+  /** kind=file：绝对路径（主进程读取，渲染层不碰文件系统） */
+  path?: string;
+  /** kind=text：粘贴的完整内容 */
+  content?: string;
+}
+
 export interface ProviderEntry {
   name: string;
   type: string;
@@ -72,6 +82,39 @@ export interface McpEntry {
   name: string;
   command: string;
   connected: boolean;
+}
+
+/** 已安装插件条目（RuntimeInfo.plugins） */
+export interface PluginEntry {
+  name: string;
+  marketplace: string;
+  version: string;
+  description: string | null;
+  enabled: boolean;
+  /** 清单格式来源：zcode 或 claude（.claude-plugin 兼容层） */
+  format: string;
+  skillCount: number;
+  commandCount: number;
+  agentCount: number;
+  mcpCount: number;
+}
+
+/** 已登记插件市场（RuntimeInfo.marketplaces） */
+export interface MarketplaceEntry {
+  id: string;
+  description: string | null;
+  pluginCount: number;
+  lastUpdated: string | null;
+  /** 来源展示文案（github:owner/repo / 本地路径 / url） */
+  source: string;
+}
+
+/** 市场内插件条目（浏览未安装插件用） */
+export interface MarketplacePluginEntry {
+  name: string;
+  description: string | null;
+  version: string | null;
+  category: string | null;
 }
 
 /** 自动化任务条目（core AutomationRecord 的渲染层视图） */
@@ -155,6 +198,8 @@ export interface RuntimeInfo {
   agents: AgentEntry[];
   skills: SkillEntry[];
   mcpServers: McpEntry[];
+  plugins: PluginEntry[];
+  marketplaces: MarketplaceEntry[];
   providers: ProviderEntry[];
   stats: StatsInfo;
   /** 激活服务商的计价配置；未配置则用量页只显示 token 数 */
@@ -203,7 +248,10 @@ export interface WcodeBridge {
   /** 置顶 / 取消置顶会话（写用户级 settings，跨重启持久） */
   setSessionPinned(sessionId: string, pinned: boolean): Promise<void>;
   searchSessions(keyword: string): Promise<SearchHitEntry[]>;
-  send(sessionId: string, text: string): Promise<void>;
+  /** 发送消息；附件以标注块随消息进入模型上下文（用户气泡仍只显示输入文本） */
+  send(sessionId: string, text: string, attachments?: AttachmentPayload[]): Promise<void>;
+  /** + 附件：系统文件对话框多选，返回绝对路径 */
+  pickFiles(): Promise<string[]>;
   abort(sessionId: string): Promise<void>;
   /** /compact 手动压缩：把当前会话历史摘要化（运行中拒绝） */
   compactSession(sessionId: string): Promise<void>;
@@ -246,6 +294,19 @@ export interface WcodeBridge {
   addMcpServer(name: string, command: string, args: string[], env?: Record<string, string>): Promise<void>;
   /** 仅允许删除用户级条目；项目级条目会报可行动错误 */
   removeMcpServer(name: string): Promise<void>;
+  // ── 插件管理（对齐 zcode）：市场登记 + 安装/卸载/启停 ──
+  /** 浏览市场内的插件清单 */
+  listMarketplaceEntries(marketId: string): Promise<MarketplacePluginEntry[]>;
+  /** 添加市场：本地目录/文件、owner/repo、git url 或 marketplace.json url */
+  pluginAddMarketplace(input: string): Promise<{ id: string; pluginCount: number }>;
+  pluginRefreshMarketplace(marketId: string): Promise<{ id: string; pluginCount: number }>;
+  /** 移除市场登记（已安装插件保留可用） */
+  pluginRemoveMarketplace(marketId: string): Promise<void>;
+  pluginInstall(marketId: string, pluginName: string): Promise<void>;
+  /** 卸载：删除 cache 快照并清除启停标记 */
+  pluginUninstall(marketId: string, pluginName: string): Promise<void>;
+  /** 启停：写 settings.plugins.enabled；hooks 仅对新建会话生效 */
+  pluginSetEnabled(marketId: string, pluginName: string, enabled: boolean): Promise<void>;
   /** 自动化任务（主进程内置调度器执行，与 CLI daemon 共库互斥） */
   listAutomations(): Promise<AutomationEntry[]>;
   addAutomation(spec: AutomationSpecInput): Promise<AutomationEntry>;

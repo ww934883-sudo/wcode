@@ -1,11 +1,27 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PermissionDecision } from "@wcode/core";
 import { classifyError, summarizeInput, type ChatItem, type UiState } from "../state";
 
 function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(marked.parse(text, { async: false }) as string);
+}
+
+/** 运行状态行：圈圈动画 + 已耗时（秒）。秒数从绝对起点算，组件重挂载不归零 */
+function RunningStatus({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const secs = Math.max(0, Math.floor((now - since) / 1000));
+  return (
+    <div className="running-status">
+      <span className="spin" />
+      <span className="running-secs">{secs}s</span>
+    </div>
+  );
 }
 
 const SUGGESTIONS = ["这个项目是做什么的？", "帮我读一下 README", "演示权限确认流程"];
@@ -14,6 +30,7 @@ export function ChatView({
   ui,
   onDecide,
   onSuggest,
+  onAddQuote,
   onFork,
   onRollback,
   onRetry,
@@ -22,15 +39,73 @@ export function ChatView({
   ui: UiState;
   onDecide: (id: string, decision: PermissionDecision) => void;
   onSuggest: (text: string) => void;
+  /** 划选工具条「添加到当前任务」：把选区文本交回面板作为输入框引用 */
+  onAddQuote?: (text: string) => void;
   onFork: (userTurn: number) => void;
   onRollback: (userTurn: number) => void;
   onRetry: (text: string) => void;
   onOpenSettings: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  /** 划选工具条位置与定格文本（点击瞬间才取值，流式输出期间天然成立） */
+  const [sel, setSel] = useState<{ x: number; y: number; text: string } | null>(null);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [ui.items]);
+
+  // 划选检测：仅在会话流容器内的单行选区上浮工具条；滚动即隐藏（位置已失真）
+  useEffect(() => {
+    if (!onAddQuote) return;
+    const onSelect = () => {
+      const el = threadRef.current;
+      if (!el) return;
+      const s = window.getSelection();
+      if (!s || s.isCollapsed || s.rangeCount === 0) {
+        setSel(null);
+        return;
+      }
+      const text = s.toString();
+      const range = s.getRangeAt(0);
+      const host = el.getBoundingClientRect();
+      const rect = range.getBoundingClientRect();
+      const inside =
+        text.trim() !== "" &&
+        rect.width + rect.height > 0 &&
+        rect.top >= host.top - 1 &&
+        rect.bottom <= host.bottom + 1;
+      // 单行选区：跨行拖选的 client rect 会出现两个以上不同 top，不浮工具条
+      const tops = new Set(
+        [...range.getClientRects()]
+          .filter((r) => r.width > 0 || r.height > 0)
+          .map((r) => Math.round(r.top / 8)),
+      );
+      if (!inside || tops.size > 1) {
+        setSel(null);
+        return;
+      }
+      setSel({
+        x: Math.min(Math.max(rect.left + rect.width / 2, 60), window.innerWidth - 60),
+        y: rect.top,
+        text,
+      });
+    };
+    const hide = () => setSel(null);
+    document.addEventListener("selectionchange", onSelect);
+    window.addEventListener("resize", hide);
+    return () => {
+      document.removeEventListener("selectionchange", onSelect);
+      window.removeEventListener("resize", hide);
+    };
+  }, [onAddQuote]);
+
+  const pickQuote = () => {
+    if (!sel || !onAddQuote) return;
+    onAddQuote(sel.text);
+    setSel(null);
+    window.getSelection()?.removeAllRanges();
+  };
 
   if (ui.items.length === 0) {
     return (
@@ -56,7 +131,19 @@ export function ChatView({
   let lastUserText = "";
   return (
     <div className="chat">
-      <div className="thread">
+      <div className="thread" ref={threadRef} onScroll={() => setSel(null)}>
+        {sel && (
+          <div className="sel-toolbar" style={{ left: sel.x, top: sel.y - 40 }}>
+            <button
+              type="button"
+              title="把这段内容作为引用追加到输入框"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={pickQuote}
+            >
+              添加到当前任务
+            </button>
+          </div>
+        )}
         {ui.items.map((item) => {
           if (item.kind === "user") {
             userTurn++;
@@ -116,6 +203,7 @@ export function ChatView({
               );
           }
         })}
+        {ui.running && ui.runningSince !== null && <RunningStatus since={ui.runningSince} />}
         <div ref={bottomRef} />
       </div>
     </div>

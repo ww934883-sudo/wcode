@@ -13,7 +13,7 @@ import {
   sourceOf,
 } from "@wcode/core";
 import { FakeProvider, RecordingHost, endTurn, type FakeTurn } from "@wcode/core/testing";
-import type { SkillDefinition, Tool } from "@wcode/core";
+import type { CommandDefinition, SkillDefinition, Tool } from "@wcode/core";
 import { handleSlashCommand, type CommandDeps, type CommandSink } from "./commands";
 
 /** 假 MCP 工具（不经 zod，直接构造 Tool 形状） */
@@ -48,7 +48,12 @@ const skills: SkillDefinition[] = [
 
 async function makeDeps(
   turns: FakeTurn[] = [],
-  opts?: { skills?: SkillDefinition[]; models?: string[] },
+  opts?: {
+    skills?: SkillDefinition[];
+    models?: string[];
+    commands?: CommandDefinition[];
+    homeDir?: string;
+  },
 ): Promise<{ deps: CommandDeps; host: RecordingHost; session: AgentSession }> {
   const provider = new FakeProvider(turns, { models: opts?.models });
   const host = new RecordingHost();
@@ -67,6 +72,9 @@ async function makeDeps(
   const deps: CommandDeps = {
     session,
     skills: opts?.skills ?? skills,
+    commands: opts?.commands ?? [],
+    cwd: "/cmd-test-project",
+    homeDir: opts?.homeDir,
     config,
     provider,
     createModelProvider: async (model) =>
@@ -92,6 +100,8 @@ async function makeDeps(
     reloadRuntime: async () => ({
       config,
       skills: opts?.skills ?? skills,
+      commands: [],
+      plugins: [],
       problems: [],
       registry,
     }),
@@ -106,8 +116,7 @@ describe("handleSlashCommand", () => {
     const out = await handleSlashCommand("/help", deps, sink);
     expect(out.kind).toBe("handled");
     expect(assistant[0]).toContain("/compact");
-    expect(assistant[0]).toContain("/goal");
-    expect(assistant[0]).toContain("/btw");
+    expect(assistant[0]).toContain("/goal");    expect(assistant[0]).toContain("/btw");
   });
 
   it("/model 无参显示当前模型；带参切换并立即生效", async () => {
@@ -280,6 +289,8 @@ describe("handleSlashCommand", () => {
       return {
         config: configSchema.parse({ model: "reloaded-model" }),
         skills: reloadedSkills,
+        commands: [],
+        plugins: [],
         problems: ["技能 bad Name 名字不合法"],
         registry: reloadedRegistry,
       };
@@ -472,5 +483,62 @@ describe("handleSlashCommand", () => {
     expect(notes[0]).toContain("1 条消息");
     expect(notes[0]).toContain("11");
     expect(notes[0]).toContain("5 token");
+  });
+});
+
+describe("自定义斜杠命令与 /plugin", () => {
+  it("自定义命令展开 $ARGUMENTS 后转发，优先于技能映射", async () => {
+    const commands: CommandDefinition[] = [
+      {
+        name: "review",
+        qualifiedName: "review",
+        description: "代码审查",
+        body: "审查 $ARGUMENTS 的变更",
+        source: "project",
+        path: "/c/review.md",
+      },
+    ];
+    const { deps } = await makeDeps([], { commands });
+    const out = await handleSlashCommand("/review src/app.ts", deps, makeSink().sink);
+    expect(out).toEqual({ kind: "forward", text: "审查 src/app.ts 的变更" });
+  });
+
+  it("插件命令以全名调用", async () => {
+    const commands: CommandDefinition[] = [
+      {
+        name: "greet",
+        namespace: "hello",
+        qualifiedName: "hello:greet",
+        description: "打招呼",
+        body: "向 $1 问好",
+        source: "plugin",
+        path: "/p/greet.md",
+      },
+    ];
+    const { deps } = await makeDeps([], { commands });
+    const out = await handleSlashCommand("/hello:greet 世界", deps, makeSink().sink);
+    expect(out).toEqual({ kind: "forward", text: "向 世界 问好" });
+  });
+
+  it("裸名歧义的命令报可行动错误", async () => {
+    const commands: CommandDefinition[] = [
+      { name: "go", namespace: "a", qualifiedName: "a:go", description: "A", body: "a", source: "plugin", path: "1" },
+      { name: "go", namespace: "b", qualifiedName: "b:go", description: "B", body: "b", source: "plugin", path: "2" },
+    ];
+    const { deps } = await makeDeps([], { commands });
+    const sink = makeSink();
+    const out = await handleSlashCommand("/go", deps, sink.sink);
+    expect(out.kind).toBe("handled");
+    expect(sink.errors[0]).toContain("全名");
+  });
+
+  it("/plugin 未安装任何插件时给出添加市场的指引", async () => {
+    // 隔离的家目录：真实 ~/.wcode/plugins 里可能有用户已装的市场
+    const home = await mkdtemp(join(tmpdir(), "wcode-plugin-home-"));
+    const { deps } = await makeDeps([], { homeDir: home });
+    const sink = makeSink();
+    const out = await handleSlashCommand("/plugin list", deps, sink.sink);
+    expect(out.kind).toBe("handled");
+    expect(sink.notes[0] ?? sink.errors[0]).toContain("plugin market add");
   });
 });

@@ -1,7 +1,11 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { errorMessage, isAbortedError } from "@wcode/core";
 import type {
   AgentHost,
   AgentSession,
+  CommandDefinition,
+  DiscoveredPlugin,
   Logger,
   ModelProvider,
   ModelRequest,
@@ -10,6 +14,23 @@ import type {
   SkillDefinition,
   ToolRegistry,
   WcodeConfig,
+} from "@wcode/core";
+import {
+  addMarketplace,
+  BUILTIN_MARKET_ID,
+  defaultPluginsDir,
+  describeSource,
+  discoverInstalledPlugins,
+  expandCommandBody,
+  findCommand,
+  installPlugin,
+  listMarketplacePlugins,
+  loadKnownMarketplaces,
+  patchUserSettings,
+  pluginKey,
+  refreshMarketplace,
+  removeMarketplace,
+  uninstallPlugin,
 } from "@wcode/core";
 import { messagesFromSessionLines } from "@wcode/core";
 import { mapSlashCommand } from "./slash";
@@ -27,6 +48,12 @@ export interface CommandSink {
 export interface CommandDeps {
   session: AgentSession;
   skills: SkillDefinition[];
+  /** 自定义斜杠命令（用户/项目/插件；内置命令之后、技能映射之前匹配） */
+  commands: CommandDefinition[];
+  /** 会话工作目录（插件发现与市场相对路径解析） */
+  cwd: string;
+  /** 家目录 ~（插件市场落在 <home>/.wcode/plugins；测试注入隔离，缺省 homedir()） */
+  homeDir?: string;
   config: WcodeConfig;
   /** 当前激活 provider（/btw 直答；/model 切换后由命令层同步替换） */
   provider: ModelProvider;
@@ -41,10 +68,12 @@ export interface CommandDeps {
   host: AgentHost;
   /** /btw 的中断控制器；Ctrl+C 时由 bin 一并 abort */
   btwAbort: { current: AbortController | null };
-  /** /reload：重建运行时快照（配置/技能/子 Agent/注册表/权限引擎/系统提示） */
+  /** /reload：重建运行时快照（配置/技能/子 Agent/命令/插件/注册表/权限引擎/系统提示） */
   reloadRuntime(): Promise<{
     config: WcodeConfig;
     skills: SkillDefinition[];
+    commands: CommandDefinition[];
+    plugins: DiscoveredPlugin[];
     problems: string[];
     registry: ToolRegistry;
   }>;
@@ -76,14 +105,17 @@ const HELP_TEXT = [
   "- **/btw** <问题> — 顺带一问：单轮直答，不进入任务上下文",
   "- **/compact** — 立即压缩上下文（结构化摘要 + 最近消息）",
   "- **/goal** [目标] — 查看/设定任务目标（压缩后依然有效）；**/goal clear** 清除",
-  "- **/reload** — 热重载配置、权限规则、hooks、技能与子 Agent 定义（无需重启）",
+  "- **/plugin** — 插件管理：list / install / uninstall / enable / disable / market（详见 /plugin）",
+  "- **/reload** — 热重载配置、权限规则、hooks、技能、自定义命令与插件（无需重启）",
   "- **/mcp** [名称] — 查看 MCP 服务器连接状态与工具（/reload 重试连接）",
   "- **/sessions** [关键词] — 无参列出最近会话；带关键词跨会话搜索消息（/resume <序号> 恢复命中会话）",
   "- **/stats** — 本项目的会话数 / 消息数 / 累计 token 用量",
   "- **/resume** [序号] — 列出并恢复历史会话",
   "- **/quit**、**/exit** — 退出 wcode",
   "",
-  "内置命令优先于同名技能。",
+  "自定义命令：~/.wcode/commands/<名>.md 或 .wcode/commands/<名>.md（frontmatter 写 description，正文用 $ARGUMENTS/$1 接参数），插件命令以「插件名:命令名」提供。",
+  "",
+  "优先级：内置命令 > 自定义命令 > 技能映射。",
 ].join("\n");
 
 const INIT_PROMPT = [
@@ -164,14 +196,16 @@ interface McpServerStatus {
 function mcpServerStatuses(deps: CommandDeps): McpServerStatus[] {
   const sourceIds = new Set(deps.registry.sourcesOf().map((s) => s.id));
   return Object.entries(deps.config.mcpServers ?? {}).map(([name, cfg]) => {
-    const prefix = `mcp__${name}__`;
+    // 插件命名空间键（plugin:插件:服务）的工具名已消毒，回查需同一规则
+    const prefix = `mcp__${name.replace(/[^a-zA-Z0-9_-]/g, "_")}__`;
     const tools = deps.registry
       .list()
       .filter((t) => t.name.startsWith(prefix))
       .map((t) => t.name.slice(prefix.length));
     return {
       name,
-      command: cfg.command,
+      // http/sse 型没有 command：命令位展示 url（schema refine 保证二者必有其一）
+      command: cfg.command ?? cfg.url ?? "",
       args: cfg.args ?? [],
       connected: sourceIds.has(`mcp:${name}`),
       tools,
@@ -191,7 +225,8 @@ export async function handleSlashCommand(
   const text = raw.trim();
   if (!text.startsWith("/")) return { kind: "forward", text: raw };
 
-  const m = /^\/([a-z0-9][a-z0-9_-]*)(?:\s+([\s\S]+))?$/i.exec(text);
+  // 命令名允许 : 与 .（插件命令「插件名:命令名」）；内置命令优先于一切
+  const m = /^\/([a-z0-9][a-z0-9._:-]*)(?:\s+([\s\S]+))?$/i.exec(text);
   if (!m) return { kind: "forward", text: raw };
   const name = (m[1] ?? "").toLowerCase();
   const args = m[2] ?? "";
@@ -440,14 +475,16 @@ export async function handleSlashCommand(
     case "reload": {
       try {
         const snap = await deps.reloadRuntime();
-        // 后续命令（/skill、/model、/mcp 等）使用重载后的配置、技能与注册表
+        // 后续命令（/skill、/model、/mcp 等）使用重载后的配置、技能、命令与注册表
         deps.config = snap.config;
         deps.skills = snap.skills;
+        deps.commands = snap.commands;
         deps.registry = snap.registry;
         const warnings =
           snap.problems.length > 0 ? `；警告: ${snap.problems.join("；")}` : "";
         sink.note(
-          `已热重载：配置、权限规则、hooks、技能（${snap.skills.length} 个）、子 Agent 定义。` +
+          `已热重载：配置、权限规则、hooks、技能（${snap.skills.length} 个）、` +
+            `自定义命令（${snap.commands.length} 个）、子 Agent 定义、插件（${snap.plugins.length} 个）。` +
             "provider 与 MCP 连接保持不变" + warnings,
         );
       } catch (err) {
@@ -497,11 +534,251 @@ export async function handleSlashCommand(
       return { kind: "handled" };
     }
 
+    case "plugin":
+      return handlePluginCommand(args, deps, sink);
+
     default: {
+      // 自定义命令（用户/项目/插件）：优先于技能映射（内置命令已在 switch 命中）
+      const lookup = findCommand(deps.commands, name);
+      if (lookup.problem) {
+        sink.error(lookup.problem);
+        return { kind: "handled" };
+      }
+      if (lookup.command) {
+        const expanded = expandCommandBody(lookup.command.body, args);
+        return { kind: "forward", text: expanded };
+      }
       const mapped = mapSlashCommand(text, deps.skills);
       if (mapped !== text) return { kind: "forward", text: mapped };
       sink.error(`未知命令 "/${name}"。输入 /help 查看可用命令。`);
       return { kind: "handled" };
     }
   }
+}
+
+/** 「name@market」或裸「name」解析；无市场时返回 undefined 由调用方跨市场查找 */
+function parsePluginRef(ref: string): { name: string; market?: string } {
+  const at = ref.lastIndexOf("@");
+  if (at > 0) return { name: ref.slice(0, at), market: ref.slice(at + 1) };
+  return { name: ref };
+}
+
+/** 插件管理（对齐 zcode 插件语义）：安装/卸载/启停/市场管理，变更后 /reload 热应用 */
+async function handlePluginCommand(
+  args: string,
+  deps: CommandDeps,
+  sink: CommandSink,
+): Promise<SlashOutcome> {
+  const home = deps.homeDir ?? homedir();
+  const pluginsDir = defaultPluginsDir(join(home, ".wcode"));
+  const [sub, ...rest] = args.trim().split(/\s+/);
+  const arg = rest.join(" ").trim();
+  const apply = async (): Promise<void> => {
+    const snap = await deps.reloadRuntime();
+    deps.config = snap.config;
+    deps.skills = snap.skills;
+    deps.commands = snap.commands;
+    deps.registry = snap.registry;
+  };
+  try {
+    if (!sub || sub === "list") {
+      const { plugins } = await discoverForList(deps);
+      if (plugins.length === 0) {
+        sink.note(
+          "尚未安装插件。用法：/plugin market add <本地目录|owner/repo|git url> 添加市场，" +
+            "然后 /plugin install <插件名>[@市场]。",
+        );
+        return { kind: "handled" };
+      }
+      const lines = plugins.map((p) => {
+        const state = p.enabled ? "已启用" : "已停用";
+        const from = p.marketplace === BUILTIN_MARKET_ID ? "内置" : `来自 ${p.marketplace}`;
+        const counts =
+          `技能 ${p.skills.length} · 命令 ${p.commands.length} · 子Agent ${p.agents.length} · MCP ${Object.keys(p.mcpServers).length}`;
+        return `- **${p.name}@${p.marketplace}** v${p.version}（${state}，${from}）— ${p.description ?? "（无描述）"}\n  ${counts}`;
+      });
+      sink.assistant(`已安装插件（${plugins.length} 个）：\n\n${lines.join("\n")}`);
+      return { kind: "handled" };
+    }
+
+    if (sub === "install") {
+      if (!arg) {
+        sink.error("用法: /plugin install <插件名>[@市场]");
+        return { kind: "handled" };
+      }
+      const { name, market } = parsePluginRef(arg);
+      const marketId = market ?? (await locatePluginMarket(name, pluginsDir));
+      const target = await installPlugin({ marketId, pluginName: name, pluginsDir, cwd: deps.cwd });
+      await apply();
+      sink.note(
+        `已安装 ${name}@${marketId} v${target.version}` +
+          (target.problems.length > 0 ? `；警告: ${target.problems.join("；")}` : "") +
+          "。技能/命令/MCP 已生效（hooks 对新建会话生效）。",
+      );
+      return { kind: "handled" };
+    }
+
+    if (sub === "uninstall") {
+      if (!arg) {
+        sink.error("用法: /plugin uninstall <插件名>[@市场]");
+        return { kind: "handled" };
+      }
+      const { name, market } = parsePluginRef(arg);
+      const marketId = market ?? (await locateInstalledMarket(name, deps));
+      await uninstallPlugin({ marketId, pluginName: name, pluginsDir });
+      // 启停标记一并清除（重装后默认启用）；内置插件记屏蔽标记，升级不装回
+      await patchUserSettings(
+        (obj) => {
+          const prev = (obj.plugins as { enabled?: Record<string, boolean> } | undefined) ?? {};
+          const enabled = { ...(prev.enabled ?? {}) };
+          delete enabled[pluginKey(name, marketId)];
+          const patch: Record<string, unknown> = { ...prev, enabled };
+          if (marketId === BUILTIN_MARKET_ID) {
+            patch.blockedBuiltins = [
+              ...new Set([...((obj.plugins as { blockedBuiltins?: string[] } | undefined)?.blockedBuiltins ?? []), name]),
+            ];
+          }
+          obj.plugins = patch;
+        },
+        { homeDir: home },
+      );
+      await apply();
+      sink.note(
+        `已卸载 ${name}@${marketId}。` +
+          (marketId === BUILTIN_MARKET_ID
+            ? "（内置插件不会随升级装回；如需恢复，从 ~/.wcode/settings.json 的 plugins.blockedBuiltins 移除该名称）"
+            : ""),
+      );
+      return { kind: "handled" };
+    }
+
+    if (sub === "enable" || sub === "disable") {
+      if (!arg) {
+        sink.error(`用法: /plugin ${sub} <插件名>[@市场]`);
+        return { kind: "handled" };
+      }
+      const { name, market } = parsePluginRef(arg);
+      const marketId = market ?? (await locateInstalledMarket(name, deps));
+      const enabled = sub === "enable";
+      await patchUserSettings(
+        (obj) => {
+          const prev = (obj.plugins as { enabled?: Record<string, boolean> } | undefined) ?? {};
+          obj.plugins = {
+            ...prev,
+            enabled: { ...(prev.enabled ?? {}), [pluginKey(name, marketId)]: enabled },
+          };
+        },
+        { homeDir: home },
+      );
+      await apply();
+      sink.note(
+        `${enabled ? "已启用" : "已停用"} ${name}@${marketId}。` +
+          "技能/命令/MCP 即刻生效；hooks 仅对启用后的新会话生效。",
+      );
+      return { kind: "handled" };
+    }
+
+    if (sub === "market") {
+      const [op, ...restArgs] = rest;
+      const marketArg = restArgs.join(" ").trim();
+      if (!op || op === "list") {
+        const known = await loadKnownMarketplaces(pluginsDir);
+        if (known.marketplaces.length === 0) {
+          sink.note(
+            "尚未登记插件市场。用法: /plugin market add <本地目录|owner/repo|git url|marketplace.json url>",
+          );
+          return { kind: "handled" };
+        }
+        const lines = known.marketplaces.map(
+          (m) => `- **${m.id}**（${m.pluginCount ?? "?"} 个插件，来源 ${describeSource(m.source)}）— ${m.description ?? ""}`,
+        );
+        sink.assistant(`已登记插件市场（${known.marketplaces.length} 个）：\n\n${lines.join("\n")}`);
+        return { kind: "handled" };
+      }
+      if (op === "add") {
+        if (!marketArg) {
+          sink.error("用法: /plugin market add <本地目录|owner/repo|git url|marketplace.json url>");
+          return { kind: "handled" };
+        }
+        const added = await addMarketplace({ input: marketArg, pluginsDir, cwd: deps.cwd });
+        sink.note(`已添加市场 ${added.id}（${added.pluginCount} 个插件）。/plugin install <名称> 安装插件。`);
+        return { kind: "handled" };
+      }
+      if (op === "refresh") {
+        if (!marketArg) {
+          sink.error("用法: /plugin market refresh <市场id>");
+          return { kind: "handled" };
+        }
+        const refreshed = await refreshMarketplace({ id: marketArg, pluginsDir, cwd: deps.cwd });
+        sink.note(`已刷新市场 ${refreshed.id}（${refreshed.pluginCount} 个插件）。已安装版本不变，重装可更新。`);
+        return { kind: "handled" };
+      }
+      if (op === "remove") {
+        if (!marketArg) {
+          sink.error("用法: /plugin market remove <市场id>");
+          return { kind: "handled" };
+        }
+        await removeMarketplace({ id: marketArg, pluginsDir });
+        sink.note(`已移除市场 ${marketArg}（已安装插件保留可用）。`);
+        return { kind: "handled" };
+      }
+      sink.error("用法: /plugin market list|add|refresh|remove");
+      return { kind: "handled" };
+    }
+
+    sink.error(
+      "用法: /plugin list | /plugin install <名>[@市场] | /plugin uninstall <名>[@市场] | " +
+        "/plugin enable|disable <名>[@市场] | /plugin market list|add|refresh|remove",
+    );
+    return { kind: "handled" };
+  } catch (err) {
+    sink.error(errorMessage(err));
+    return { kind: "handled" };
+  }
+}
+
+/** /plugin list：插件元信息与组件计数（直接重新发现，免维护状态） */
+async function discoverForList(
+  deps: CommandDeps,
+): Promise<{ plugins: DiscoveredPlugin[] }> {
+  const res = await discoverInstalledPlugins({
+    cwd: deps.cwd,
+    homeDir: join(deps.homeDir ?? homedir(), ".wcode"),
+    config: deps.config,
+  });
+  return { plugins: res.plugins };
+}
+
+/** 裸插件名 → 所在市场：唯一命中直接用，否则报可行动错误 */
+async function locatePluginMarket(name: string, pluginsDir: string): Promise<string> {
+  const known = await loadKnownMarketplaces(pluginsDir);
+  if (known.marketplaces.length === 0) {
+    throw new Error("尚未登记插件市场。先 /plugin market add <目录|owner/repo|git url>。");
+  }
+  const hits: string[] = [];
+  for (const m of known.marketplaces) {
+    try {
+      const { entries } = await listMarketplacePlugins({ id: m.id, pluginsDir });
+      if (entries.some((e) => e.name === name)) hits.push(m.id);
+    } catch {
+      // 市场物化损坏：跳过，由 refresh 修复
+    }
+  }
+  if (hits.length === 1) return hits[0] ?? "";
+  if (hits.length === 0) {
+    throw new Error(`已登记的市场里都没有插件 "${name}"。/plugin market list 查看，或确认名称。`);
+  }
+  throw new Error(`插件 "${name}" 在多个市场存在（${hits.join("、")}），请用 ${name}@市场 指定。`);
+}
+
+/** 裸插件名 → 已安装市场（卸载/启停用） */
+async function locateInstalledMarket(name: string, deps: CommandDeps): Promise<string> {
+  const { plugins } = await discoverForList(deps);
+  const hits = plugins.filter((p) => p.name === name);
+  const first = hits[0];
+  if (hits.length === 1 && first) return first.marketplace;
+  if (hits.length === 0) {
+    throw new Error(`插件 "${name}" 未安装。/plugin list 查看已安装插件。`);
+  }
+  throw new Error(`插件 "${name}" 从多个市场安装（${hits.map((h) => h.marketplace).join("、")}），请用 ${name}@市场 指定。`);
 }

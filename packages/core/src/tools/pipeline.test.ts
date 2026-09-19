@@ -132,4 +132,25 @@ describe("ToolExecutor 管道", () => {
       ex.execute({ id: "1", name: "slow", input: {} }, null as never),
     ).rejects.toThrow(AbortedError);
   });
+
+  it("中止时挂起的权限询问被解除，以中断收尾而非悬挂", async () => {
+    const host = new RecordingHost();
+    // 不预置 permissionResponses：宿主永不回答，模拟用户停在弹窗上按了中止
+    const mutating = defineTool({
+      name: "write",
+      description: "x",
+      schema: z.object({ text: z.string() }),
+      isReadOnly: false,
+      execute: async () => ({ content: "executed!" }),
+    });
+    const ex = new ToolExecutor(await makeRegistry([mutating]), makeDeps(host, new PermissionEngine()));
+    const ac = new AbortController();
+    const pending = ex.execute(
+      { id: "1", name: "write", input: { text: "a" } },
+      { session: makeSession("/tmp"), signal: ac.signal, log: createFileLogger({ level: "error" }) },
+    );
+    ac.abort();
+    await expect(pending).rejects.toThrow(/abort/i);
+    expect(host.permissionRequests).toHaveLength(1);
+  });
 });

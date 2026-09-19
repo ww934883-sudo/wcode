@@ -1,4 +1,4 @@
-import { errorMessage } from "@wcode/core";
+import { errorMessage, permissionModeSchema, type PermissionMode } from "@wcode/core";
 import { AutomationStore, projectDirHash, type AutomationRecord } from "@wcode/core";
 import {
   createDefaultRunner,
@@ -110,6 +110,12 @@ function scheduleAdd(store: AutomationStore, args: string[], io: ScheduleIo): nu
   const hasAt = flags["at"] !== undefined;
   if (hasCron === hasAt) {
     io.err("需要 --cron 或 --at 之一（且只能一个）。\n" + SCHEDULE_USAGE);
+    return 2;
+  }
+  // 入口即校验：非法 mode 存进库要到派发时才报「配置不合法」，错误信息指不到 mode
+  const mode = flags["mode"];
+  if (mode !== undefined && !permissionModeSchema.options.includes(mode as PermissionMode)) {
+    io.err(`非法权限模式 "${mode}"。可选: ${permissionModeSchema.options.join(" | ")}`);
     return 2;
   }
   const rec = store.add({

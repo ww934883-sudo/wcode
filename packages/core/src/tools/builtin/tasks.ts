@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { appendFileSync, closeSync, openSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { defineTool } from "../tool";
 import type { BackgroundTaskInfo, SessionState } from "../../session/state";
-import { killPid, pickShell } from "./shell-utils";
+import { killPid, pickShell, powershellSpec } from "./shell-utils";
 
 const TASKS_DIR = join(homedir(), ".wcode", "tasks");
 const DEFAULT_TAIL_CHARS = 4000;
@@ -21,7 +21,7 @@ export async function startBackgroundTask(
   const id = `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const outputPath = join(TASKS_DIR, `${id}.log`);
 
-  const spec = pickShell();
+  let spec = pickShell();
   const fd = openSync(outputPath, "w");
   let child;
   try {
@@ -44,9 +44,47 @@ export async function startBackgroundTask(
     done: false,
   };
   registry.set(id, info);
+  /** bash 启动失败已切 PowerShell 重试：原失败子进程的 close（Windows 携带 -4058）不得提前标记任务完成 */
+  let fallbackInFlight = false;
   child.on("close", (code) => {
+    if (fallbackInFlight) return;
     info.done = true;
     info.exitCode = code ?? -1;
+  });
+  // shell 不在 PATH 时 spawn 不同步抛错，错误经 error 事件异步到达；
+  // 不监听会变成宿主进程未捕获异常（桌面端会弹崩溃对话框）
+  child.on("error", (err) => {
+    // bash 不在 PATH（Windows）：换 PowerShell 重试一次，与 bash 工具的降级路径一致
+    if (
+      (err as NodeJS.ErrnoException).code === "ENOENT" &&
+      process.platform === "win32" &&
+      spec.name === "bash"
+    ) {
+      fallbackInFlight = true;
+      spec = powershellSpec();
+      info.shell = spec.name;
+      const retryFd = openSync(outputPath, "a");
+      const retry = spawn(spec.cmd, [...spec.args, command], {
+        cwd,
+        windowsHide: true,
+        stdio: ["ignore", retryFd, retryFd],
+      });
+      closeSync(retryFd); // 子进程持有已复制的句柄，父进程侧可关闭
+      info.pid = retry.pid;
+      retry.on("close", (code) => {
+        info.done = true;
+        info.exitCode = code ?? -1;
+      });
+      retry.on("error", (err2) => {
+        info.done = true;
+        info.exitCode = -1;
+        appendFileSync(outputPath, `shell 启动失败: ${err2.message}\n`);
+      });
+      return;
+    }
+    info.done = true;
+    info.exitCode = -1;
+    appendFileSync(outputPath, `shell 启动失败: ${err.message}\n`);
   });
 
   return {

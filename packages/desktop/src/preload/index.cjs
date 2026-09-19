@@ -20,7 +20,9 @@ contextBridge.exposeInMainWorld("wcode", {
   setSessionPinned: (sessionId, pinned) =>
     ipcRenderer.invoke("wcode:setSessionPinned", sessionId, pinned),
   searchSessions: (keyword) => ipcRenderer.invoke("wcode:search", keyword),
-  send: (sessionId, text) => ipcRenderer.invoke("wcode:send", sessionId, text),
+  send: (sessionId, text, attachments) =>
+    ipcRenderer.invoke("wcode:send", sessionId, text, attachments ?? []),
+  pickFiles: () => ipcRenderer.invoke("wcode:pickFiles"),
   abort: (sessionId) => ipcRenderer.invoke("wcode:abort", sessionId),
   compactSession: (sessionId) => ipcRenderer.invoke("wcode:compactSession", sessionId),
   listProjectFiles: (cwd, query, limit) =>
@@ -58,6 +60,19 @@ contextBridge.exposeInMainWorld("wcode", {
   addMcpServer: (name, command, args, env) =>
     ipcRenderer.invoke("wcode:addMcpServer", name, command, args, env),
   removeMcpServer: (name) => ipcRenderer.invoke("wcode:removeMcpServer", name),
+  listMarketplaceEntries: (marketId) =>
+    ipcRenderer.invoke("wcode:listMarketplaceEntries", marketId),
+  pluginAddMarketplace: (input) => ipcRenderer.invoke("wcode:pluginAddMarketplace", input),
+  pluginRefreshMarketplace: (marketId) =>
+    ipcRenderer.invoke("wcode:pluginRefreshMarketplace", marketId),
+  pluginRemoveMarketplace: (marketId) =>
+    ipcRenderer.invoke("wcode:pluginRemoveMarketplace", marketId),
+  pluginInstall: (marketId, pluginName) =>
+    ipcRenderer.invoke("wcode:pluginInstall", marketId, pluginName),
+  pluginUninstall: (marketId, pluginName) =>
+    ipcRenderer.invoke("wcode:pluginUninstall", marketId, pluginName),
+  pluginSetEnabled: (marketId, pluginName, enabled) =>
+    ipcRenderer.invoke("wcode:pluginSetEnabled", marketId, pluginName, enabled),
   listAutomations: () => ipcRenderer.invoke("wcode:listAutomations"),
   addAutomation: (spec) => ipcRenderer.invoke("wcode:addAutomation", spec),
   removeAutomation: (id) => ipcRenderer.invoke("wcode:removeAutomation", id),

@@ -72,45 +72,51 @@ async function ripgrepSearch(args: SearchArgs): Promise<SearchResult | null> {
   if (args.include) rgArgs.push("--glob", args.include);
   rgArgs.push(".");
 
-  try {
-    const proc = spawn("rg", rgArgs, {
-      cwd: args.root,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      if (stdout.length < 2_000_000) stdout += chunk.toString("utf8");
-    });
-    proc.stderr?.on("data", () => {
-      /* 退出码非 0/1 的情况按无结果处理，stderr 不上抛 */
-    });
-    const timedOut = await new Promise<boolean>((resolve2) => {
+  const proc = spawn("rg", rgArgs, {
+    cwd: args.root,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    if (stdout.length < 2_000_000) stdout += chunk.toString("utf8");
+  });
+  proc.stderr?.on("data", () => {
+    /* 退出码非 0/1 的情况按无结果处理，stderr 不上抛 */
+  });
+  // rg 不在 PATH 时 spawn 不同步抛错，而是异步发 error 事件；
+  // 不监听会变成宿主进程未捕获异常（桌面端会弹崩溃对话框）
+  const outcome = await new Promise<"close" | "timeout" | NodeJS.ErrnoException>(
+    (resolve2) => {
       const timer = setTimeout(() => {
         proc.kill();
-        resolve2(true);
+        resolve2("timeout");
       }, RG_TIMEOUT_MS);
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        resolve2(err);
+      });
       // rg 无匹配时退出码为 1，属正常；其他非零退出按无结果处理
       proc.on("close", () => {
         clearTimeout(timer);
-        resolve2(false);
+        resolve2("close");
       });
-    });
-    if (timedOut) return { matches: [], truncated: true };
-
-    const matches = stdout
-      .split("\n")
-      .filter((l) => l.trim().length > 0)
-      .slice(0, MAX_RESULTS + 1);
-    return {
-      matches: matches.slice(0, MAX_RESULTS),
-      truncated: matches.length > MAX_RESULTS,
-    };
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return null; // rg 不存在 → 降级
+    },
+  );
+  if (outcome !== "close" && outcome !== "timeout") {
+    if (outcome.code === "ENOENT") return null; // rg 不存在 → 降级
     return { matches: [], truncated: false };
   }
+  if (outcome === "timeout") return { matches: [], truncated: true };
+
+  const matches = stdout
+    .split("\n")
+    .filter((l) => l.trim().length > 0)
+    .slice(0, MAX_RESULTS + 1);
+  return {
+    matches: matches.slice(0, MAX_RESULTS),
+    truncated: matches.length > MAX_RESULTS,
+  };
 }
 
 async function fallbackSearch(args: SearchArgs): Promise<SearchResult> {

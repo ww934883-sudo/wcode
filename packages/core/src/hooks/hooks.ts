@@ -1,7 +1,14 @@
 import { spawn } from "node:child_process";
 import type { HooksConfig, HookDef } from "../config/schema";
 
-export type HookEvent = "session_start" | "pre_tool_use" | "post_tool_use";
+export type HookEvent =
+  | "session_start"
+  | "user_prompt_submit"
+  | "pre_tool_use"
+  | "permission_request"
+  | "post_tool_use"
+  | "post_tool_use_failure"
+  | "stop";
 
 export interface HookOutcome {
   /** 仅 pre_tool_use：阻断原因（hook 以退出码 2 表达） */
@@ -107,10 +114,31 @@ function matchesMatcher(matcher: string | undefined, toolName: string): MatcherV
   }
 }
 
+/** matcher 只对工具类事件有意义；其余事件忽略 */
+const TOOL_EVENTS = new Set<HookEvent>([
+  "pre_tool_use",
+  "post_tool_use",
+  "post_tool_use_failure",
+  "permission_request",
+]);
+
 function pickDefs(event: HookEvent, hooks: HooksConfig): HookDef[] {
-  if (event === "session_start") return hooks.sessionStart;
-  if (event === "pre_tool_use") return hooks.preToolUse;
-  return hooks.postToolUse;
+  switch (event) {
+    case "session_start":
+      return hooks.sessionStart;
+    case "user_prompt_submit":
+      return hooks.userPromptSubmit;
+    case "pre_tool_use":
+      return hooks.preToolUse;
+    case "permission_request":
+      return hooks.permissionRequest;
+    case "post_tool_use":
+      return hooks.postToolUse;
+    case "post_tool_use_failure":
+      return hooks.postToolUseFailure;
+    case "stop":
+      return hooks.stop;
+  }
 }
 
 function shortReason(text: string): string {
@@ -122,7 +150,8 @@ function shortReason(text: string): string {
  * 执行一组 lifecycle hook（架构接缝：工具管道 hookPre/hookPost 的具体实现）。
  * 约定（对齐业界惯例）：
  *   - hook 进程从 stdin 收到 JSON payload（含 event/toolName/toolInput/cwd）
- *   - 退出码 0 = 放行；退出码 2 = 阻断（stderr/stdout 为原因，仅 pre_tool_use 有效）
+ *   - 退出码 0 = 放行；退出码 2 = 阻断（stderr/stdout 为原因，仅 pre_tool_use /
+ *     permission_request 有效，分别对应拦截工具调用与自动拒绝授权）
  *   - 其他退出码 = 非致命错误 → notices，不阻断主流程
  */
 export async function runHooks(
@@ -134,7 +163,7 @@ export async function runHooks(
   const defs = pickDefs(event, hooks);
   const outcome: HookOutcome = { notices: [] };
   for (const def of defs) {
-    if (event === "pre_tool_use" || event === "post_tool_use") {
+    if (TOOL_EVENTS.has(event)) {
       const verdict = matchesMatcher(def.matcher, String(payload.toolName ?? ""));
       if (verdict.problem) {
         outcome.notices.push(verdict.problem);
@@ -151,11 +180,11 @@ export async function runHooks(
     });
     const r = await runHookCommand(def.command, body, {
       cwd: opts.cwd,
-      timeoutMs: opts.timeoutMs ?? hooks.timeoutMs,
+      timeoutMs: def.timeoutMs ?? opts.timeoutMs ?? hooks.timeoutMs,
       signal: opts.signal,
     });
     if (r.code === 0) continue;
-    if (r.code === 2 && event === "pre_tool_use") {
+    if (r.code === 2 && (event === "pre_tool_use" || event === "permission_request")) {
       outcome.blocked = shortReason(r.stderr || r.stdout || "（hook 未输出原因）");
       return outcome;
     }

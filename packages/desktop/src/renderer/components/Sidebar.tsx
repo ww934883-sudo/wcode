@@ -4,12 +4,15 @@ import type { ProjectEntry, RuntimeInfo, SearchHitEntry } from "../../shared/pro
 function SessionButton({
   entry,
   active,
+  running,
   onClick,
   onDelete,
   onTogglePin,
 }: {
   entry: { id: string; title: string; time: string; messageCount: number; pinned: boolean };
   active: boolean;
+  /** 该会话正在运行：标题左侧圈圈动画 */
+  running: boolean;
   onClick: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
@@ -41,7 +44,16 @@ function SessionButton({
         </svg>
       </button>
       <button className={active ? "session active" : "session"} onClick={onClick}>
-        <span className="session-title">{entry.title}</span>
+        <span className="session-title-row">
+          {/* 运行中转圈圈，结束后（当前会话且已有消息）亮绿点 */}
+          {running ? (
+            <span className="spin session-spin" aria-hidden="true" />
+          ) : (
+            active &&
+            entry.messageCount > 0 && <span className="session-dot" aria-hidden="true" />
+          )}
+          <span className="session-title">{entry.title}</span>
+        </span>
         <span className="session-meta">
           {entry.time && <span className="session-time">{entry.time}</span>}
           {entry.messageCount > 0 && <span className="session-count">{entry.messageCount}条</span>}
@@ -76,6 +88,7 @@ function ProjectGroup({
   onDeleteSession,
   onTogglePin,
   activeId,
+  runningIds,
   onPickFolder,
 }: {
   project: ProjectEntry;
@@ -83,6 +96,7 @@ function ProjectGroup({
   onDeleteSession: (cwd: string, sessionId: string, title: string) => void;
   onTogglePin: (sessionId: string, pinned: boolean) => void;
   activeId: string | null;
+  runningIds: ReadonlySet<string>;
   onPickFolder: () => void;
 }) {
   return (
@@ -106,6 +120,7 @@ function ProjectGroup({
               key={s.id}
               entry={s}
               active={s.id === activeId}
+              running={runningIds.has(s.id)}
               onClick={() => onOpenSession(project.cwd, s.id)}
               onDelete={() => onDeleteSession(project.cwd, s.id, s.title)}
               onTogglePin={() => onTogglePin(s.id, !s.pinned)}
@@ -121,6 +136,7 @@ function ProjectGroup({
 export function Sidebar({
   info,
   activeSessionId,
+  runningIds,
   searchResults,
   split,
   onSearch,
@@ -133,6 +149,8 @@ export function Sidebar({
 }: {
   info: RuntimeInfo | null;
   activeSessionId: string | null;
+  /** 正在运行中的会话 id（分屏时可同时多个），驱动行首圈圈动画 */
+  runningIds: ReadonlySet<string>;
   searchResults: SearchHitEntry[] | null;
   split: boolean;
   onSearch: (keyword: string) => void;
@@ -244,6 +262,7 @@ export function Sidebar({
               onDeleteSession={onDeleteSession}
               onTogglePin={onTogglePin}
               activeId={activeSessionId}
+              runningIds={runningIds}
               onPickFolder={onPickFolder}
             />
           ))}

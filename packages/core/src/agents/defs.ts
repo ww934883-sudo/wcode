@@ -20,7 +20,8 @@ export interface CustomAgentDef {
   /** "all" | "readonly" | 工具名列表 */
   tools: "all" | "readonly" | string[];
   body: string;
-  source: "user" | "project";
+  /** plugin 来源的名称带命名空间（插件名:Agent名） */
+  source: "user" | "project" | "plugin";
   path: string;
 }
 
@@ -31,7 +32,7 @@ export interface AgentMarkdown {
   body: string;
 }
 
-function parseToolsField(raw: string | undefined): CustomAgentDef["tools"] {
+export function parseToolsField(raw: string | undefined): CustomAgentDef["tools"] {
   const v = raw?.trim();
   if (!v) return "readonly";
   if (v === "all" || v === "readonly") return v;

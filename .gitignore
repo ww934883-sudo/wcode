@@ -6,3 +6,6 @@ coverage/
 .wcode/
 evals-results/
 .ref-shots/
+.tmp-ref/
+.zcode/
+shot*.png

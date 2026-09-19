@@ -1,0 +1,16 @@
+{
+  "name": "browser-use",
+  "version": "0.1.2",
+  "description": "浏览器操作：以远程调试模式驱动 Chrome/Edge——打开页面、执行 JS、点击填表、截图、读取渲染后内容（零依赖 CDP 脚本）",
+  "author": {
+    "name": "wcode"
+  },
+  "license": "MIT",
+  "keywords": [
+    "browser",
+    "cdp",
+    "automation",
+    "screenshot"
+  ],
+  "skills": "skills"
+}

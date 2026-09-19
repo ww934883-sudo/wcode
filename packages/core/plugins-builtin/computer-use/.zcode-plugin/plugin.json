@@ -1,0 +1,16 @@
+{
+  "name": "computer-use",
+  "version": "0.1.1",
+  "description": "电脑控制：屏幕截图、鼠标点击、键盘输入、窗口与进程管理（Windows PowerShell 脚本，附 macOS/Linux 等价命令）",
+  "author": {
+    "name": "wcode"
+  },
+  "license": "MIT",
+  "keywords": [
+    "desktop",
+    "screenshot",
+    "automation",
+    "windows"
+  ],
+  "skills": "skills"
+}

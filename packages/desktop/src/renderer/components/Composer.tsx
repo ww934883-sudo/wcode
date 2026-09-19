@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { PASTE_TO_ATTACHMENT_CHARS, type AttachmentItem, type QuoteItem } from "../state";
 
 /** 斜杠命令面板条目：aliases[0] 作为面板里展示的命令 token */
 export interface ComposerCommand {
@@ -8,26 +9,33 @@ export interface ComposerCommand {
   aliases?: string[];
 }
 
-/** $ / @ 引用面板条目：insert 为插入正文的引用 token（不含触发符） */
+/** $ / @ / # 引用面板条目：insert 为插入正文的引用 token（不含触发符） */
 export interface MentionItem {
-  kind: "skill" | "plugin" | "file";
+  kind: "skill" | "plugin" | "file" | "session";
   name: string;
   detail?: string;
   insert: string;
 }
 
-export type MentionTrigger = "$" | "@";
+export type MentionTrigger = "$" | "@" | "#";
 
 const MENTION_KIND_LABEL: Record<MentionItem["kind"], string> = {
   skill: "技能",
   plugin: "插件",
   file: "文件",
+  session: "会话",
 };
 
 export function Composer({
   running,
   onSend,
   onAbort,
+  quotes,
+  onRemoveQuote,
+  attachments,
+  onRemoveAttachment,
+  onPickAttachments,
+  onPasteToAttachment,
   toolbar,
   trailing,
   projectName,
@@ -38,6 +46,14 @@ export function Composer({
   running: boolean;
   onSend: (text: string) => void;
   onAbort: () => void;
+  /** 划选引用（补充上下文）：条状展示在输入区上方，发送时并入消息 */
+  quotes?: QuoteItem[];
+  onRemoveQuote?: (id: string) => void;
+  /** 附件：+ 选择文件 / 粘贴长文自动转存，发送时经主进程进入模型上下文 */
+  attachments?: AttachmentItem[];
+  onRemoveAttachment?: (id: string) => void;
+  onPickAttachments?: () => void;
+  onPasteToAttachment?: (text: string) => void;
   /** 输入卡底部左侧工具（权限模式等） */
   toolbar?: ReactNode;
   /** 输入卡底部右侧组（模型/思考，与发送按钮等间距排列） */
@@ -47,7 +63,7 @@ export function Composer({
   /** 斜杠命令面板（行首 / 唤起） */
   commands?: ComposerCommand[];
   onCommand?: (id: string) => void;
-  /** $ / @ 引用面板（技能/插件/文件），由调用方按触发符解析候选 */
+  /** $ / @ / # 引用面板（技能/插件/文件/会话），由调用方按触发符解析候选 */
   resolveMentions?: (trigger: MentionTrigger, query: string) => Promise<MentionItem[]>;
 }) {
   const [text, setText] = useState("");
@@ -65,11 +81,11 @@ export function Composer({
   }, [text]);
 
   // ── 触发器识别 ──
-  // 行首 / = 命令面板；$ / @ = 引用面板（光标前最后一个「触发符+token」，可嵌在句中）
+  // 行首 / = 命令面板；$ / @ / # = 引用面板（光标前最后一个「触发符+token」，可嵌在句中）
   const beforeCaret = text.slice(0, caret ?? text.length);
   const slashQuery =
     text.startsWith("/") && !text.includes("\n") ? text.slice(1).trim().toLowerCase() : null;
-  const triggerMatch = /(?:^|[\s(\[（【])([$@])([\w\u4e00-\u9fa5./\\-]*)$/.exec(beforeCaret);
+  const triggerMatch = /(?:^|[\s(\[（【])([$@#])([\w\u4e00-\u9fa5./\\-]*)$/.exec(beforeCaret);
   const trigger = (triggerMatch?.[1] ?? null) as MentionTrigger | null;
   const mentionQuery = triggerMatch?.[2] ?? "";
   const tokenStart =
@@ -143,6 +159,48 @@ export function Composer({
     <div className="composer">
       {projectName && <div className="composer-project">{projectName}</div>}
       <div className="composer-box">
+        {attachments && attachments.length > 0 && (
+          <div className="quote-row" aria-label="附件列表">
+            {attachments.map((a) => (
+              <span
+                key={a.id}
+                className="quote-chip attach-chip"
+                title={a.kind === "file" ? a.path : a.content}
+              >
+                <span className="quote-chip-text">
+                  {(a.kind === "file" ? "📎 " : "📋 ") + a.name}
+                </span>
+                <button
+                  type="button"
+                  className="quote-chip-x"
+                  title="移除附件"
+                  onClick={() => onRemoveAttachment?.(a.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {quotes && quotes.length > 0 && (
+          <div className="quote-row" aria-label="引用列表">
+            {quotes.map((q) => (
+              <span key={q.id} className="quote-chip" title={q.text}>
+                <span className="quote-chip-text">
+                  {q.text.length > 42 ? q.text.slice(0, 42) + "…" : q.text}
+                </span>
+                <button
+                  type="button"
+                  className="quote-chip-x"
+                  title="移除引用"
+                  onClick={() => onRemoveQuote?.(q.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {paletteOpen && (
           <div className="cmd-palette" role="listbox" aria-label="候选列表">
             {commandMatches.length > 0
@@ -187,10 +245,22 @@ export function Composer({
           placeholder={
             running
               ? "运行中…可点击下方停止"
-              : "输入消息，/ 命令，$ 技能，@ 插件/文件，Enter 发送"
+              : "输入消息，/ 命令，$ 技能，@ 插件/文件，# 会话，Enter 发送"
           }
           onChange={(e) => setText(e.target.value)}
           onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart)}
+          onPaste={(e) => {
+            // 粘贴长文自动转附件：输入框只留条目不刷屏，完整内容随发送进入上下文
+            const pasted = e.clipboardData.getData("text/plain");
+            if (
+              pasted.length > PASTE_TO_ATTACHMENT_CHARS &&
+              onPasteToAttachment &&
+              !e.clipboardData.files.length
+            ) {
+              e.preventDefault();
+              onPasteToAttachment(pasted);
+            }
+          }}
           onKeyDown={(e) => {
             if (paletteOpen) {
               if (e.key === "ArrowDown") {
@@ -225,6 +295,16 @@ export function Composer({
           }}
         />
         <div className="composer-foot">
+          {onPickAttachments && (
+            <button
+              type="button"
+              className="attach-btn"
+              title="添加附件（文件）"
+              onClick={onPickAttachments}
+            >
+              +
+            </button>
+          )}
           {toolbar}
           <div className="composer-trailing">
             {trailing}

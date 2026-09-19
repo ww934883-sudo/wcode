@@ -2,9 +2,27 @@ import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
 import path from "node:path";
 import { errorMessage } from "@wcode/core";
 import type { PermissionDecision, PermissionMode } from "@wcode/core";
-import type { RuntimeInfo } from "../shared/protocol";
+import type { AttachmentPayload, RuntimeInfo } from "../shared/protocol";
 import { IpcHost } from "./host";
 import { DesktopRuntime } from "./runtime";
+
+/** IPC 附件入参消毒：只保留已知字段与类型，未知形态直接丢弃 */
+function parseAttachments(raw: unknown): AttachmentPayload[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AttachmentPayload[] = [];
+  for (const a of raw) {
+    if (!a || typeof a !== "object") continue;
+    const rec = a as Record<string, unknown>;
+    const name = typeof rec.name === "string" ? rec.name : "";
+    if (name === "") continue;
+    if (rec.kind === "text" && typeof rec.content === "string") {
+      out.push({ name, kind: "text", content: rec.content });
+    } else if (rec.kind === "file" && typeof rec.path === "string" && rec.path !== "") {
+      out.push({ name, kind: "file", path: rec.path });
+    }
+  }
+  return out;
+}
 
 // 主进程由 esbuild 打成 CJS（dist/main/index.cjs），__dirname 原生可用；
 // 不能用 import.meta.url——esbuild 对 ESM 输入会降级成空对象
@@ -47,9 +65,17 @@ function registerIpc(): void {
     rt().setSessionPinned(String(sessionId), Boolean(pinned)),
   );
   ipcMain.handle("wcode:search", (_e, keyword: unknown) => rt().search(String(keyword ?? "")));
-  ipcMain.handle("wcode:send", (_e, sessionId: unknown, text: unknown) =>
-    rt().runTurn(String(sessionId), String(text ?? "")),
+  ipcMain.handle("wcode:send", (_e, sessionId: unknown, text: unknown, attachments: unknown) =>
+    rt().runTurn(String(sessionId), String(text ?? ""), parseAttachments(attachments)),
   );
+  ipcMain.handle("wcode:pickFiles", async () => {
+    if (!win) return [];
+    const picked = await dialog.showOpenDialog(win, {
+      properties: ["openFile", "multiSelections"],
+      title: "添加附件",
+    });
+    return picked.canceled ? [] : picked.filePaths;
+  });
   ipcMain.handle("wcode:abort", (_e, sessionId: unknown) => {
     rt().abort(String(sessionId));
   });
@@ -152,6 +178,28 @@ function registerIpc(): void {
     ),
   );
   ipcMain.handle("wcode:removeMcpServer", (_e, name: unknown) => rt().removeMcpServer(String(name)));
+  // ── 插件管理（对齐 zcode）──
+  ipcMain.handle("wcode:listMarketplaceEntries", (_e, marketId: unknown) =>
+    rt().listMarketplaceEntries(String(marketId)),
+  );
+  ipcMain.handle("wcode:pluginAddMarketplace", (_e, input: unknown) =>
+    rt().pluginAddMarketplace(String(input ?? "")),
+  );
+  ipcMain.handle("wcode:pluginRefreshMarketplace", (_e, marketId: unknown) =>
+    rt().pluginRefreshMarketplace(String(marketId)),
+  );
+  ipcMain.handle("wcode:pluginRemoveMarketplace", (_e, marketId: unknown) =>
+    rt().pluginRemoveMarketplace(String(marketId)),
+  );
+  ipcMain.handle("wcode:pluginInstall", (_e, marketId: unknown, pluginName: unknown) =>
+    rt().pluginInstall(String(marketId), String(pluginName)),
+  );
+  ipcMain.handle("wcode:pluginUninstall", (_e, marketId: unknown, pluginName: unknown) =>
+    rt().pluginUninstall(String(marketId), String(pluginName)),
+  );
+  ipcMain.handle("wcode:pluginSetEnabled", (_e, marketId: unknown, pluginName: unknown, enabled: unknown) =>
+    rt().pluginSetEnabled(String(marketId), String(pluginName), Boolean(enabled)),
+  );
   ipcMain.handle("wcode:listAutomations", () => rt().listAutomations());
   ipcMain.handle("wcode:addAutomation", (_e, spec: unknown) => {
     const s = spec as Record<string, unknown>;

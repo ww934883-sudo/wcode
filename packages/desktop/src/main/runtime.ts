@@ -4,16 +4,28 @@ import path from "node:path";
 import {
   AgentSession,
   ALL_THINKING_LEVELS,
+  BUILTIN_MARKET_ID,
   PermissionEngine,
   ToolRegistry,
+  assembleExtensions,
   buildSystemPrompt,
   createBuiltinToolSource,
   createMcpToolSource,
   createSessionDriver,
+  defaultPluginsDir,
   defaultPromptSections,
-  discoverAgents,
-  discoverSkills,
   errorMessage,
+  addMarketplace,
+  describeSource,
+  installPlugin,
+  seedBuiltinPlugins,
+  listMarketplacePlugins,
+  loadKnownMarketplaces,
+  findCommand,
+  expandCommandBody,
+  refreshMarketplace,
+  removeMarketplace,
+  uninstallPlugin,
   loadConfig,
   messagesFromSessionLines,
   ModelCatalogStore,
@@ -21,6 +33,8 @@ import {
   type AgentEvent,
   type AgentHost,
   type CustomAgentDef,
+  type DiscoveredPlugin,
+  type ExtensionBundle,
   type McpServerConfig,
   type Message,
   type ModelProvider,
@@ -34,7 +48,7 @@ import {
 } from "@wcode/core";
 import { AnthropicProvider } from "@wcode/provider-anthropic";
 import { OpenAIChatProvider, OpenAIResponsesProvider } from "@wcode/provider-openai";
-import type { PermissionMode, RuntimeInfo, SearchHitEntry, SessionEntry, ThinkingLevel, ModelCatalogGroup } from "../shared/protocol";
+import type { AttachmentPayload, PermissionMode, RuntimeInfo, SearchHitEntry, SessionEntry, ThinkingLevel, ModelCatalogGroup } from "../shared/protocol";
 import type { AutomationDeps } from "./automation";
 import { AutomationDesk } from "./automation";
 import { buildDemoTurns, ScriptedProvider } from "./demo-script";
@@ -83,6 +97,8 @@ export class DesktopRuntime {
   private sessions = new Map<string, DeskSession>();
   private agents: CustomAgentDef[] = [];
   private skills: SkillDefinition[] = [];
+  /** 扩展装配结果（用户/项目发现 + 已安装插件组件），refreshDiscoveries 时更新 */
+  private bundle: ExtensionBundle | null = null;
   private readonly homeDir: string;
   private automationDesk: AutomationDesk | null = null;
   private catalog: ModelCatalogStore | null = null;
@@ -105,6 +121,8 @@ export class DesktopRuntime {
       this.config = null;
       this.notice = `配置加载失败（${errorMessage(err)}）`;
     }
+    // 配置层 permissions.mode 与 CLI 同源生效（此前桌面端静默忽略该配置）
+    this.permissionMode = this.config?.permissions.mode ?? "default";
     if (this.opts.demo) {
       this.notice = "演示模式：模型输出为本地脚本，工具、权限、会话存储真实执行";
     } else {
@@ -122,6 +140,23 @@ export class DesktopRuntime {
     if (this.mode === "real") {
       this.realProvider = this.buildRealProvider(this.model);
       this.syncThinkingCapability();
+    }
+    // 内置插件播种：随应用分发的插件装进本机缓存（默认启用；升级重装；卸载过的不装回）。
+    // 失败降级为提示，不阻塞启动
+    const builtinDir = this.builtinPluginsDir();
+    if (builtinDir && this.config) {
+      try {
+        const seeded = await seedBuiltinPlugins({
+          pluginsDir: defaultPluginsDir(path.join(this.homeDir, ".wcode")),
+          builtinDir,
+          blockedBuiltins: this.config.plugins.blockedBuiltins,
+        });
+        if (seeded.problems.length > 0) {
+          this.notice = `内置插件播种异常: ${seeded.problems.join("；")}`;
+        }
+      } catch (err) {
+        this.notice = `内置插件播种失败（${errorMessage(err)}）`;
+      }
     }
     await this.refreshDiscoveries();
     await this.rebuildRegistry();
@@ -228,7 +263,7 @@ export class DesktopRuntime {
     }
   }
 
-  /** MCP：真实模式连接启用的 server；失败降级为问题清单不阻塞启动 */
+  /** MCP：真实模式连接启用的 server（含插件命名空间 server）；失败降级为问题清单不阻塞启动 */
   private async rebuildRegistry(): Promise<void> {
     const registry = new ToolRegistry();
     // 注入发现的 skills/agents：skill 工具随可用技能注册（空列表不注册避免迷惑模型）
@@ -237,7 +272,7 @@ export class DesktopRuntime {
     );
     this.mcpConnected.clear();
     this.mcpProblems = [];
-    const servers = this.config?.mcpServers ?? {};
+    const servers = this.bundle?.mcpServers ?? this.config?.mcpServers ?? {};
     for (const [name, cfg] of Object.entries(servers)) {
       if (this.mcpDisabled.has(name)) continue;
       try {
@@ -252,13 +287,19 @@ export class DesktopRuntime {
 
   async refreshDiscoveries(): Promise<void> {
     const cwd = this.currentCwd;
-    const fallback = { items: [], problems: [] as string[] };
-    const [skillsRes, agentsRes] = await Promise.all([
-      discoverSkills({ cwd }).catch(() => fallback),
-      discoverAgents({ cwd }).catch(() => fallback),
-    ]);
-    this.skills = skillsRes.items;
-    this.agents = agentsRes.items;
+    if (this.config) {
+      try {
+        this.bundle = await assembleExtensions({
+          cwd,
+          homeDir: path.join(this.homeDir, ".wcode"),
+          config: this.config,
+        });
+      } catch {
+        this.bundle = null;
+      }
+    }
+    this.skills = this.bundle?.skills ?? [];
+    this.agents = this.bundle?.agents ?? [];
   }
 
   private async driverFor(cwd: string): Promise<SessionDriver> {
@@ -323,6 +364,9 @@ export class DesktopRuntime {
       maxContextTokens: this.contextTokens,
       thinking: this.thinkingLevel,
       initialMessages,
+      // lifecycle hooks（配置 + 插件 hooks.json 合并），此前桌面端未接线
+      hooks: this.bundle?.hooks ?? this.config?.hooks,
+      customAgents: this.bundle?.agents ?? this.agents,
     });
     this.sessions.set(sessionId, {
       id: sessionId,
@@ -452,14 +496,19 @@ export class DesktopRuntime {
     this.opts.cb.onInfo();
   }
 
-  async runTurn(sessionId: string, text: string): Promise<void> {
+  async runTurn(sessionId: string, text: string, attachments: AttachmentPayload[] = []): Promise<void> {
     const desk = this.sessions.get(sessionId);
     if (!desk || desk.running || text.trim() === "") return;
     desk.running = true;
     this.opts.cb.onInfo();
     try {
-      // $技能 / @插件 / @文件 引用展开后随消息进入模型上下文
-      await desk.session.run(this.expandMentions(text, desk.cwd));
+      // 自定义斜杠命令（用户/项目/插件）先展开为提示词，再做 $/@/# 引用展开
+      const asCommand = this.expandSlashCommand(text.trim());
+      const expanded = this.expandAttachments(
+        await this.expandMentions(asCommand, desk.cwd, sessionId),
+        attachments,
+      );
+      await desk.session.run(expanded);
     } catch (err) {
       // run() 抛出即无 done 事件，补两条让渲染层复位
       this.host.emit(sessionId, { type: "error", message: errorMessage(err) });
@@ -470,12 +519,22 @@ export class DesktopRuntime {
     }
   }
 
+  /** 自定义斜杠命令展开：/命令 [参数] → 命令模板（$ARGUMENTS/$1 替换）；未命中原样返回 */
+  private expandSlashCommand(text: string): string {
+    if (!text.startsWith("/")) return text;
+    const m = /^\/([a-z0-9][a-z0-9._:-]*)(?:\s+([\s\S]*))?$/.exec(text);
+    if (!m) return text;
+    const lookup = findCommand(this.bundle?.commands ?? [], (m[1] ?? "").toLowerCase());
+    if (!lookup.command) return text;
+    return expandCommandBody(lookup.command.body, (m[2] ?? "").trim());
+  }
+
   /**
-   * 引用展开：把 $技能 / @插件 / @文件 的内容以标注块附加在用户消息尾部
+   * 引用展开：把 $技能 / @插件 / @文件 / #历史会话 的内容以标注块附加在用户消息尾部
    * （原文保留，渲染层气泡仍显示用户输入）。
-   * 文件引用只解析相对 cwd 且不越界的路径；不可读的 token 原样保留。
+   * 文件引用只解析相对 cwd 且不越界的路径；不可读/未知的 token 原样保留。
    */
-  private expandMentions(text: string, cwd: string): string {
+  private async expandMentions(text: string, cwd: string, sessionId: string): Promise<string> {
     const blocks: string[] = [];
 
     for (const name of new Set([...text.matchAll(/\$([\w-]+)/g)].map((m) => m[1]!))) {
@@ -508,7 +567,70 @@ export class DesktopRuntime {
       }
     }
 
+    // #历史会话：把该会话的用户/助手对话记录带入上下文（工具结果不重复带入，
+    // 助手文本已概括其结果）；只解析本项目存储里的会话，未知 id 原样保留
+    for (const token of new Set([...text.matchAll(/#([\w-]+)/g)].map((m) => m[1]!))) {
+      if (token === sessionId) {
+        blocks.push(`[用户提到了当前会话 #${token}：其历史已在上下文中，无需重复展开]`);
+        continue;
+      }
+      try {
+        const store = await (await this.driverFor(cwd)).open(token);
+        let transcript = "";
+        for (const m of messagesFromSessionLines(await store.load())) {
+          if (m.role === "user") {
+            if (typeof m.content === "string" && m.content.trim() !== "") {
+              transcript += `用户：${m.content}\n\n`;
+            }
+          } else if (m.role === "assistant" && m.text.trim() !== "") {
+            transcript += `助手：${m.text}\n\n`;
+          }
+        }
+        transcript = transcript.trim();
+        if (transcript === "") continue; // 空会话/纯工具会话：无可关联内容
+        if (transcript.length > 30_000) {
+          transcript = transcript.slice(0, 30_000) + "\n…（已截断）";
+        }
+        blocks.push(
+          `[用户关联的历史会话 #${token}，以下对话记录是本次任务的背景参考]\n${transcript}`,
+        );
+      } catch {
+        // 未知/不可读会话：token 原样保留，不展开
+      }
+    }
+
     return blocks.length > 0 ? text + "\n\n" + blocks.join("\n\n") : text;
+  }
+
+  /**
+   * 附件展开：文件按路径读取、粘贴长文按内容原样带入，均以标注块附加在消息尾部
+   * （与 @ 引用同一截断上限）；读取失败给可行动标注块而不是静默丢弃。
+   */
+  private expandAttachments(text: string, attachments: AttachmentPayload[]): string {
+    if (attachments.length === 0) return text;
+    const blocks: string[] = [];
+    for (const a of attachments) {
+      if (a.kind === "text") {
+        let content = a.content ?? "";
+        if (content.length > 30_000) {
+          content = content.slice(0, 30_000) + "\n…（已截断）";
+        }
+        blocks.push(`[用户粘贴的长文（转存为附件 ${a.name}）]\n${content}`);
+        continue;
+      }
+      try {
+        let content = fs.readFileSync(a.path ?? "", "utf8");
+        if (content.length > 30_000) {
+          content = content.slice(0, 30_000) + "\n…（已截断，完整内容可用 read 工具读取）";
+        }
+        blocks.push(`[用户上传的附件 ${a.name}]\n${content}`);
+      } catch (err) {
+        blocks.push(
+          `[用户上传的附件 ${a.name}：读取失败（${errorMessage(err)}）。如影响任务请向用户说明，不要凭空编造附件内容]`,
+        );
+      }
+    }
+    return text + "\n\n" + blocks.join("\n\n");
   }
 
   /** @ 文件引用候选：浅递归扫 cwd（跳过依赖/构建目录与隐藏项），按 query 过滤 */
@@ -813,14 +935,18 @@ export class DesktopRuntime {
     this.opts.cb.onInfo();
   }
 
-  /** 以下两项对新会话生效（会话创建时装配） */
+  /** 上下文上限对新会话生效（会话创建时装配）；权限模式由 setPermissionMode 即时传播 */
   setContextTokens(tokens: number): void {
     this.contextTokens = tokens;
     this.opts.cb.onInfo();
   }
 
+  /** 即时传播到已挂载会话：UI 显示的选择值必须与各会话实际生效的模式一致 */
   setPermissionMode(mode: PermissionMode): void {
     this.permissionMode = mode;
+    for (const desk of this.sessions.values()) {
+      desk.session.setPermissionMode(mode);
+    }
     this.opts.cb.onInfo();
   }
 
@@ -919,6 +1045,132 @@ export class DesktopRuntime {
     await this.rebuildRegistry();
     this.notice = `MCP ${name} 已删除`;
     this.opts.cb.onInfo();
+  }
+
+  // ── 插件管理（对齐 zcode）：安装/卸载/启停/市场，全部落在 ~/.wcode/plugins ──
+
+  private pluginsHome(): string {
+    return path.join(this.homeDir, ".wcode");
+  }
+
+  /**
+   * 内置插件根目录（仓库 packages/core/plugins-builtin）。
+   * 主进程经 esbuild 打包为 dist/main/index.cjs，__dirname 即 dist/main；
+   * 打包发布场景用 WCODE_BUILTIN_PLUGINS_DIR 指向随包资源。
+   */
+  private builtinPluginsDir(): string | null {
+    const env = process.env.WCODE_BUILTIN_PLUGINS_DIR;
+    if (env) return env;
+    const candidate = path.join(__dirname, "..", "..", "..", "core", "plugins-builtin");
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+  private async applyExtensions(): Promise<void> {
+    await this.refreshDiscoveries();
+    await this.rebuildRegistry();
+    this.opts.cb.onInfo();
+  }
+
+  /** 浏览市场的插件清单（安装状态由渲染层对照 RuntimeInfo.plugins 判定） */
+  async listMarketplaceEntries(
+    marketId: string,
+  ): Promise<Array<{ name: string; description?: string; version?: string; category?: string }>> {
+    const { entries } = await listMarketplacePlugins({
+      id: marketId,
+      pluginsDir: defaultPluginsDir(this.pluginsHome()),
+    });
+    return entries.map((e) => ({
+      name: e.name,
+      description: e.description,
+      version: e.version,
+      category: e.category,
+    }));
+  }
+
+  async pluginAddMarketplace(input: string): Promise<{ id: string; pluginCount: number }> {
+    const added = await addMarketplace({
+      input,
+      pluginsDir: defaultPluginsDir(this.pluginsHome()),
+      cwd: this.currentCwd,
+    });
+    this.notice = `已添加插件市场 ${added.id}`;
+    this.opts.cb.onInfo();
+    return added;
+  }
+
+  async pluginRefreshMarketplace(marketId: string): Promise<{ id: string; pluginCount: number }> {
+    return refreshMarketplace({
+      id: marketId,
+      pluginsDir: defaultPluginsDir(this.pluginsHome()),
+      cwd: this.currentCwd,
+    });
+  }
+
+  async pluginRemoveMarketplace(marketId: string): Promise<void> {
+    await removeMarketplace({ id: marketId, pluginsDir: defaultPluginsDir(this.pluginsHome()) });
+    this.notice = `已移除插件市场 ${marketId}`;
+    this.opts.cb.onInfo();
+  }
+
+  async pluginInstall(marketId: string, pluginName: string): Promise<void> {
+    const target = await installPlugin({
+      marketId,
+      pluginName,
+      pluginsDir: defaultPluginsDir(this.pluginsHome()),
+      cwd: this.currentCwd,
+    });
+    await this.applyExtensions();
+    this.notice =
+      `插件 ${pluginName} v${target.version} 已安装` +
+      (target.problems.length > 0 ? `；警告: ${target.problems.join("；")}` : "");
+  }
+
+  async pluginUninstall(marketId: string, pluginName: string): Promise<void> {
+    await uninstallPlugin({
+      marketId,
+      pluginName,
+      pluginsDir: defaultPluginsDir(this.pluginsHome()),
+    });
+    await patchUserSettings((obj) => {
+      const prev = (obj.plugins as { enabled?: Record<string, boolean> } | undefined) ?? {};
+      const enabled = { ...(prev.enabled ?? {}) };
+      delete enabled[`${pluginName}@${marketId}`];
+      const patch: Record<string, unknown> = { ...prev, enabled };
+      // 内置插件记屏蔽标记：不随应用升级装回（恢复方式见提示）
+      if (marketId === BUILTIN_MARKET_ID) {
+        patch.blockedBuiltins = [
+          ...new Set([
+            ...((obj.plugins as { blockedBuiltins?: string[] } | undefined)?.blockedBuiltins ?? []),
+            pluginName,
+          ]),
+        ];
+      }
+      obj.plugins = patch;
+    }, this.homeDir);
+    await this.reloadConfig();
+    await this.applyExtensions();
+    this.notice =
+      `插件 ${pluginName} 已卸载` +
+      (marketId === BUILTIN_MARKET_ID
+        ? "（内置插件不会随升级装回；如需恢复，从 ~/.wcode/settings.json 的 plugins.blockedBuiltins 移除该名称）"
+        : "");
+  }
+
+  async pluginSetEnabled(marketId: string, pluginName: string, enabled: boolean): Promise<void> {
+    await patchUserSettings((obj) => {
+      const prev = (obj.plugins as { enabled?: Record<string, boolean> } | undefined) ?? {};
+      obj.plugins = {
+        ...prev,
+        enabled: { ...(prev.enabled ?? {}), [`${pluginName}@${marketId}`]: enabled },
+      };
+    }, this.homeDir);
+    await this.reloadConfig();
+    await this.applyExtensions();
+    this.notice = `插件 ${pluginName} 已${enabled ? "启用" : "停用"}（hooks 对新建会话生效）`;
   }
 
   /**
@@ -1051,11 +1303,37 @@ export class DesktopRuntime {
         description: s.description,
         source: s.source,
       })),
-      mcpServers: Object.entries(this.config?.mcpServers ?? {}).map(([name, cfg]) => ({
+      mcpServers: Object.entries(
+        this.bundle?.mcpServers ?? this.config?.mcpServers ?? {},
+      ).map(([name, cfg]) => ({
         name,
-        command: cfg.command,
+        // http/sse 型没有 command：展示 url（schema refine 保证二者必有其一）
+        command: cfg.command ?? cfg.url ?? "",
         connected: this.mcpConnected.has(name) && !this.mcpDisabled.has(name),
       })),
+      plugins: (this.bundle?.plugins ?? []).map((p) => ({
+        name: p.name,
+        marketplace: p.marketplace,
+        version: p.version,
+        description: p.description ?? null,
+        enabled: p.enabled,
+        format: p.format,
+        skillCount: p.skills.length,
+        commandCount: p.commands.length,
+        agentCount: p.agents.length,
+        mcpCount: Object.keys(p.mcpServers).length,
+      })),
+      marketplaces: await loadKnownMarketplaces(defaultPluginsDir(this.pluginsHome())).then(
+        (f) =>
+          f.marketplaces.map((m) => ({
+            id: m.id,
+            description: m.description ?? null,
+            pluginCount: m.pluginCount ?? 0,
+            lastUpdated: m.lastUpdated ?? null,
+            source: describeSource(m.source),
+          })),
+        () => [],
+      ),
       providers: Object.entries(this.config?.providers ?? {}).map(([name, cfg]) => ({
         name,
         type: cfg.type,

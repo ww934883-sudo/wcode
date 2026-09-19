@@ -10,7 +10,7 @@ import { ToolRegistry, sourceOf } from "../tools/registry";
 import { ToolExecutor, type HookFn } from "../tools/pipeline";
 import type { ToolContext } from "../tools/tool";
 import type { SubAgentTask } from "../tools/builtin/task";
-import { PermissionEngine } from "../permission/engine";
+import { PermissionEngine, type PermissionMode } from "../permission/engine";
 import type { SessionState } from "../session/state";
 import { createSessionState } from "../session/state";
 import type { SessionStore } from "../session/store";
@@ -34,6 +34,14 @@ import {
 import { runHooks } from "../hooks/hooks";
 import type { HooksConfig } from "../config/schema";
 import type { CustomAgentDef } from "../agents/defs";
+
+/** HookEvent → HooksConfig 里的定义数组键 */
+const EVENT_DEFS_KEY = {
+  pre_tool_use: "preToolUse",
+  post_tool_use: "postToolUse",
+  permission_request: "permissionRequest",
+  post_tool_use_failure: "postToolUseFailure",
+} as const;
 
 export interface AgentSessionOptions {
   provider: ModelProvider;
@@ -131,6 +139,8 @@ export class AgentSession {
       maxOutputChars: this.maxOutputChars,
       hookPre: this.makeHookFn("pre_tool_use"),
       hookPost: this.makeHookFn("post_tool_use"),
+      hookPermissionRequest: this.makeHookFn("permission_request"),
+      hookFailure: this.makeHookFn("post_tool_use_failure"),
     });
   }
 
@@ -168,11 +178,13 @@ export class AgentSession {
   }
 
   /** hooks 配置 → 工具管道 HookFn；未配置对应事件时返回 undefined（零开销） */
-  private makeHookFn(event: "pre_tool_use" | "post_tool_use"): HookFn | undefined {
+  private makeHookFn(
+    event: "pre_tool_use" | "post_tool_use" | "permission_request" | "post_tool_use_failure",
+  ): HookFn | undefined {
     const hooks = this.hooks;
     if (!hooks) return undefined;
-    const defs = event === "pre_tool_use" ? hooks.preToolUse : hooks.postToolUse;
-    if (defs.length === 0) return undefined;
+    const defs = hooks[EVENT_DEFS_KEY[event]];
+    if (!defs || defs.length === 0) return undefined;
     return async ({ toolName, input, signal }) => {
       const outcome = await runHooks(
         event,
@@ -204,6 +216,14 @@ export class AgentSession {
     this.thinking = level;
   }
 
+  /**
+   * 运行期切换权限模式（桌面端模式选择器）：引擎就地改模式，立即对下一批
+   * 工具调用生效；会话 allowAlways 规则保留（换引擎实例会丢掉这些授权）。
+   */
+  setPermissionMode(mode: PermissionMode): void {
+    this.engine.setMode(mode);
+  }
+
   /** /goal 设定任务目标：并入 effective system prompt，压缩上下文后依然有效 */
   setGoal(goal: string | undefined): void {
     const trimmed = goal?.trim();
@@ -224,6 +244,14 @@ export class AgentSession {
     this.abortController = new AbortController();
     const { signal } = this.abortController;
 
+    // UserPromptSubmit hook：在消息落盘前执行，exit-2 可拦下整条输入
+    const submit = await this.runSessionHook("user_prompt_submit", { prompt: input }, signal);
+    if (submit?.block) {
+      const reply = `输入被 UserPromptSubmit Hook 阻断: ${submit.reason ?? "无理由"}`;
+      this.host.emit({ type: "done", reason: "end_turn" });
+      return { status: "end_turn", reply };
+    }
+
     await this.pushMessage({ role: "user", content: input });
 
     let lastText = "";
@@ -242,6 +270,7 @@ export class AgentSession {
         });
 
         if (res.stopReason !== "tool_use") {
+          await this.runSessionHook("stop", { reason: "end_turn", lastReply: res.text }, signal);
           this.host.emit({ type: "done", reason: "end_turn" });
           return { status: "end_turn", reply: res.text };
         }
@@ -258,6 +287,31 @@ export class AgentSession {
       }
       throw err;
     }
+  }
+
+  /**
+   * 会话级 hook（user_prompt_submit / stop）：notices 记日志不中断；
+   * 返回 block 结果供调用方决定是否拦截（仅 user_prompt_submit 有拦截语义）。
+   */
+  private async runSessionHook(
+    event: "user_prompt_submit" | "stop",
+    payload: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{ block: boolean; reason?: string } | undefined> {
+    const hooks = this.hooks;
+    const defs = hooks ? hooks[event === "user_prompt_submit" ? "userPromptSubmit" : "stop"] : [];
+    if (!hooks || !defs || defs.length === 0) return undefined;
+    const outcome = await runHooks(
+      event,
+      hooks,
+      { ...payload, cwd: this.state.cwd },
+      { cwd: this.state.cwd, signal },
+    );
+    for (const notice of outcome.notices) {
+      this.log.warn("hook.notice", { event, notice });
+    }
+    if (outcome.blocked !== undefined) return { block: true, reason: outcome.blocked };
+    return undefined;
   }
 
   private async callModel(signal: AbortSignal): Promise<ModelResponse> {

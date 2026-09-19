@@ -1,18 +1,18 @@
 /* wcode 桌面版 demo 主题：浅色基底 + 靛紫 accent（对齐 CodePilot 参考风格） */
 
 :root {
-  --bg-main: #fafafa;
-  --bg-sidebar: #f1f0f4;
-  --bg-rail: #e9e7f0;
+  --bg-main: #f9f9fb;
+  --bg-sidebar: #f4f4f7;
+  --bg-rail: #ebebef;
   --surface: #ffffff;
-  --border: #e4e2ea;
-  --border-strong: #d4d1de;
-  --text: #1f1d2a;
-  --text-2: #6b6879;
-  --text-3: #9b98a8;
-  --accent: #5b4df0;
-  --accent-strong: #4840d8;
-  --accent-weak: #efedfd;
+  --border: #e7e7ee;
+  --border-strong: #d8d8e2;
+  --text: #232329;
+  --text-2: #65656f;
+  --text-3: #9a9aa5;
+  --accent: #6c5ce7;
+  --accent-strong: #584bd3;
+  --accent-weak: #efedfb;
   --ok: #188554;
   --err: #c4402f;
   --warn-bg: #fff8e6;
@@ -23,28 +23,30 @@
   --danger-bg: #fdf3f2;
   --danger-border: #f3c1c1;
   --danger-text: #a3382e;
-  --accent-border: #dcd6fa;
-  --bg-muted: #f2f1f7;
+  --accent-border: #d9d4f4;
+  --bg-muted: #f1f1f6;
   --on-accent: #ffffff;
+  /* 主色填充（大色块用）：上浅下深制造受光感，纯平填充显廉价 */
+  --accent-fill: linear-gradient(180deg, #7b6af0, #6152e2);
   --radius: 10px;
   --mono: "Cascadia Code", Consolas, "JetBrains Mono", monospace;
   color-scheme: light;
 }
 
-/* ---- 深色主题：纯黑基底（OLED 友好），紫色 accent 提亮保持对比 ---- */
+/* ---- 深色主题：紫炭基底（非纯黑，面板略亮于主区形成浮起层次） ---- */
 :root[data-theme="dark"] {
-  --bg-main: #000000;
-  --bg-sidebar: #0c0c0f;
-  --bg-rail: #111114;
-  --surface: #17171b;
-  --border: #2a2a30;
-  --border-strong: #3d3d45;
-  --text: #f2f1f5;
-  --text-2: #a8a6b3;
-  --text-3: #73717e;
-  --accent: #8677ff;
-  --accent-strong: #9b8fff;
-  --accent-weak: rgba(134, 119, 255, 0.18);
+  --bg-main: #17171d;
+  --bg-sidebar: #1d1d25;
+  --bg-rail: #121217;
+  --surface: #24242d;
+  --border: #2e2e39;
+  --border-strong: #40404e;
+  --text: #ececf1;
+  --text-2: #a3a2b0;
+  --text-3: #77767f;
+  --accent: #8f80f3;
+  --accent-strong: #a394f6;
+  --accent-weak: rgba(143, 128, 243, 0.16);
   --ok: #34c08c;
   --err: #e0604c;
   --warn-bg: #2a2419;
@@ -55,9 +57,10 @@
   --danger-bg: #2b1614;
   --danger-border: #5c2e28;
   --danger-text: #f08d7e;
-  --accent-border: #38335c;
-  --bg-muted: #1c1c22;
+  --accent-border: #423d6e;
+  --bg-muted: #26262f;
   --on-accent: #ffffff;
+  --accent-fill: linear-gradient(180deg, #9d8ff7, #8677ee);
   color-scheme: dark;
 }
 
@@ -110,7 +113,7 @@ button {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
   font-weight: 700;
   font-size: 18px;
@@ -156,7 +159,7 @@ button {
 }
 
 .new-chat {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
   border-radius: var(--radius);
   padding: 9px 12px;
@@ -165,7 +168,7 @@ button {
 }
 
 .new-chat:hover {
-  background: var(--accent-strong);
+  filter: brightness(1.07);
 }
 
 .search input {
@@ -256,6 +259,31 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* 标题行首状态位：运行中圈圈 / 结束绿点，与文字留一档间隔 */
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-spin {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  flex: none;
+}
+
+.session-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
 }
 
 .session-time {
@@ -421,6 +449,118 @@ button {
   margin-left: 2px;
   vertical-align: text-bottom;
   animation: blink 1s steps(2) infinite;
+}
+
+/* 运行状态行：圈圈 + 已耗时秒数，跟随线程流末尾 */
+.running-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 4px;
+}
+
+/* 划选工具条：浮在选区上方（fixed，坐标来自选区的视口矩形） */
+.sel-toolbar {
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+  padding: 3px;
+}
+
+.sel-toolbar button {
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sel-toolbar button:hover {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+/* 划选引用条：输入区上方的可移除条目 */
+.quote-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+
+/* 附件条目：与引用条同款 chip，只换强调色 */
+.attach-chip {
+  color: var(--accent);
+  background: var(--accent-weak);
+  border-color: var(--accent-border);
+}
+
+/* 输入卡左下角的 + 附件按钮 */
+.attach-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attach-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-weak);
+}
+
+.quote-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+}
+
+.quote-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.quote-chip-x {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.quote-chip-x:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.running-secs {
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes blink {
@@ -679,14 +819,14 @@ button {
   width: 52px;
   height: 52px;
   border-radius: 16px;
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
   font-size: 28px;
   font-weight: 700;
   display: grid;
   place-items: center;
   margin-bottom: 6px;
-  box-shadow: 0 6px 20px rgba(91, 77, 240, 0.28);
+  box-shadow: 0 6px 20px rgba(108, 92, 231, 0.25);
 }
 
 .empty h1 {
@@ -813,6 +953,13 @@ button {
 
 .cmd-kind.kind-file {
   color: var(--text-2);
+}
+
+/* 会话引用：琥珀色与技能/插件区分（关联的是历史对话而非实体） */
+.cmd-kind.kind-session {
+  color: var(--warn-text);
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
 }
 
 .cmd-hint {
@@ -2106,7 +2253,10 @@ button {
 .composer-project {
   font-size: 11.5px;
   color: var(--text-3);
-  margin: 0 6px 6px;
+  /* 与输入卡同宽居中：对话态 composer 占满整栏，若不约束宽度项目名会贴到窗口最左侧 */
+  max-width: 780px;
+  margin: 0 auto 6px;
+  padding: 0 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

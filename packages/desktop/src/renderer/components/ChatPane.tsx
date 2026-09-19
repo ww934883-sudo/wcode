@@ -8,7 +8,7 @@ import type {
   ModelCatalogGroup,
 } from "../../shared/protocol";
 import type { MentionItem, MentionTrigger } from "./Composer";
-import type { ChatItem, UiState } from "../state";
+import type { ChatItem, QuoteItem, UiState } from "../state";
 import { Composer, type ComposerCommand } from "./Composer";
 import { DropdownSelect } from "./DropdownSelect";
 import { ModelSelect } from "./ModelSelect";
@@ -46,6 +46,11 @@ export function ChatPane({
   active,
   onActivate,
   onSend,
+  onAddQuote,
+  onRemoveQuote,
+  onPickAttachments,
+  onPasteToAttachment,
+  onRemoveAttachment,
   onAbort,
   onDecide,
   onFork,
@@ -72,6 +77,13 @@ export function ChatPane({
   active: boolean;
   onActivate: () => void;
   onSend: (text: string) => void;
+  /** 划选「添加到当前任务」：校验上限后追加为输入框引用 */
+  onAddQuote: (text: string) => void;
+  onRemoveQuote: (id: string) => void;
+  /** 附件：+ 文件选择 / 粘贴长文转存 / 移除 */
+  onPickAttachments: () => void;
+  onPasteToAttachment: (text: string) => void;
+  onRemoveAttachment: (id: string) => void;
   onAbort: () => void;
   onDecide: (askId: string, decision: PermissionDecision) => void;
   onFork: (userTurn: number) => void;
@@ -103,6 +115,12 @@ export function ChatPane({
       running={pane.ui.running}
       onSend={onSend}
       onAbort={onAbort}
+      quotes={pane.ui.quotes}
+      onRemoveQuote={onRemoveQuote}
+      attachments={pane.ui.attachments}
+      onRemoveAttachment={onRemoveAttachment}
+      onPickAttachments={onPickAttachments}
+      onPasteToAttachment={onPasteToAttachment}
       commands={commands}
       onCommand={onCommand}
       resolveMentions={resolveMentions}
@@ -193,6 +211,7 @@ export function ChatPane({
         ui={pane.ui}
         onDecide={onDecide}
         onSuggest={onSend}
+        onAddQuote={onAddQuote}
         onFork={onFork}
         onRollback={onRollback}
         onRetry={onSend}

@@ -9,21 +9,44 @@ export const permissionModeSchema = z.enum([
 
 /** lifecycle hook 定义：command 从 stdin 收 JSON payload（hooks/hooks.ts） */
 export const hookDefSchema = z.object({
-  /** 工具名过滤（正则字符串，如 "write|edit"）；缺省匹配全部。仅工具事件有效 */
+  /** 工具名过滤（正则字符串，如 "write|edit"）；缺省匹配全部。仅工具类事件有效 */
   matcher: z.string().optional(),
   command: z.string().min(1),
+  /** 单条 hook 超时（毫秒）；缺省用 hooks.timeoutMs（插件 hooks.json 的秒级 timeout 转换而来） */
+  timeoutMs: z.number().int().positive().optional(),
 });
 
+/** 七个生命周期事件（键为 camelCase；对齐 zcode 插件 hooks.json 的 PascalCase 事件） */
 export const hooksSchema = z.object({
-  /** 单个 hook 进程超时 */
+  /** 单个 hook 进程的缺省超时 */
   timeoutMs: z.number().int().positive().default(30_000),
   sessionStart: z.array(hookDefSchema).default([]),
+  userPromptSubmit: z.array(hookDefSchema).default([]),
   preToolUse: z.array(hookDefSchema).default([]),
+  permissionRequest: z.array(hookDefSchema).default([]),
   postToolUse: z.array(hookDefSchema).default([]),
+  postToolUseFailure: z.array(hookDefSchema).default([]),
+  stop: z.array(hookDefSchema).default([]),
 });
 
 export type HooksConfig = z.infer<typeof hooksSchema>;
 export type HookDef = z.infer<typeof hookDefSchema>;
+
+/** 单个 MCP 服务器声明（settings.json 的 mcpServers 与插件 .mcp.json 共用） */
+export const mcpServerSpecSchema = z
+  .object({
+    type: z.enum(["stdio", "http", "sse"]).optional(),
+    command: z.string().optional(),
+    args: z.array(z.string()).default([]),
+    env: z.record(z.string(), z.string()).optional(),
+    url: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+  })
+  .refine((v) => Boolean(v.command || v.url), {
+    message: "需要 command（stdio）或 url（http/sse）之一",
+  });
+
+export type McpServerSpec = z.infer<typeof mcpServerSpecSchema>;
 
 export const configSchema = z.object({
   /** 当前激活的 provider 键（providers 的 key） */
@@ -80,19 +103,21 @@ export const configSchema = z.object({
       level: z.enum(["debug", "info", "warn", "error"]).default("info"),
     })
     .default({ level: "info" }),
-  /** MCP servers（架构文档 §11）：连接失败降级跳过，不阻塞启动 */
+  /** MCP servers（架构文档 §11）：连接失败降级跳过，不阻塞启动。
+   * stdio（command）与 http/sse（url）二选一；有 command 默认 stdio，有 url 默认 http */
   mcpServers: z
-    .record(
-      z.string(),
-      z.object({
-        command: z.string(),
-        args: z.array(z.string()).default([]),
-        env: z.record(z.string(), z.string()).optional(),
-      }),
-    )
+    .record(z.string(), mcpServerSpecSchema)
     .default({}),
-  /** lifecycle hooks（M2）：见 hooksSchema */
-  hooks: hooksSchema.default({ timeoutMs: 30_000, sessionStart: [], preToolUse: [], postToolUse: [] }),
+  /** lifecycle hooks（M2，事件对齐 zcode 插件）：见 hooksSchema */
+  hooks: hooksSchema.default({}),
+  /** 插件启停标记：键 = `插件名@市场id`；缺省 = 安装即启用 */
+  plugins: z
+    .object({
+      enabled: z.record(z.string(), z.boolean()).default({}),
+      /** 被卸载的内置插件名单：卸载过的内置插件不随应用升级装回（对齐 zcode 屏蔽标记） */
+      blockedBuiltins: z.array(z.string()).default([]),
+    })
+    .default({}),
   /** 桌面端置顶的会话 id（会话 id 全局唯一，跨项目平铺） */
   pinnedSessions: z.array(z.string()).default([]),
   /**

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { configSchema, type WcodeConfig } from "./schema";
 import { ConfigError, errorMessage } from "../errors";
+import { writeFileAtomic } from "../fs/atomic";
 
 export interface LoadConfigOptions {
   /** CLI 参数层（最高优先级） */
@@ -89,4 +90,35 @@ function mergeLayer(
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+export interface PatchUserSettingsOptions {
+  /** 家目录（~），默认 homedir()；测试注入隔离 */
+  homeDir?: string;
+}
+
+/**
+ * 用户级 ~/.wcode/settings.json 读改写三段式补丁（CLI 插件启停、桌面端配置页共用）：
+ * 只改 patch 回调触碰的键，其余字段原样保留，原子落盘。
+ */
+export async function patchUserSettings(
+  patch: (obj: Record<string, unknown>) => void,
+  opts: PatchUserSettingsOptions = {},
+): Promise<void> {
+  const home = opts.homeDir ?? homedir();
+  const file = join(home, ".wcode", "settings.json");
+  let obj: Record<string, unknown> = {};
+  if (existsSync(file)) {
+    try {
+      const parsed = JSON.parse(await readFile(file, "utf8")) as unknown;
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        obj = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // 损坏的用户配置按空对象起步（首次写回前不破坏原文件内容判断交给用户）
+      obj = {};
+    }
+  }
+  patch(obj);
+  await writeFileAtomic(file, JSON.stringify(obj, null, 2));
 }

@@ -46,7 +46,18 @@ export function globMatch(pattern: string, candidate: string): boolean {
   return re.test(candidate);
 }
 
-export function globToRegExp(pattern: string): RegExp {
+/**
+ * 命令串匹配：* 允许跨 /。命令不是路径，`git *` 必须命中
+ * `git add src/app.ts`，沿用路径语义会让含路径参数的 allow 规则静默失效。
+ */
+export function globMatchCommand(pattern: string, candidate: string): boolean {
+  return globToRegExp(pattern, { crossSlash: true }).test(candidate);
+}
+
+export function globToRegExp(
+  pattern: string,
+  opts?: { crossSlash?: boolean },
+): RegExp {
   let out = "";
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i] as string;
@@ -57,7 +68,7 @@ export function globToRegExp(pattern: string): RegExp {
         i++;
         if (pattern[i + 1] === "/") i++;
       } else {
-        out += "[^/]*";
+        out += opts?.crossSlash ? ".*" : "[^/]*";
       }
     } else if (c === "?") {
       out += ".";

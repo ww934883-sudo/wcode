@@ -32,6 +32,53 @@ describe("PermissionEngine 优先级与模式", () => {
     expect(plan.evaluate(ctx({ toolName: "read", isReadOnly: true }))).toEqual({ decision: "allow" });
   });
 
+  it("plan 是硬上限：config allow 规则也放不进变更类操作", () => {
+    const e = new PermissionEngine({
+      mode: "plan",
+      rules: [parseRuleString("write", "allow", "config")],
+    });
+    expect(e.evaluate(ctx({})).decision).toBe("deny");
+    // deny 规则优先级更高，给出具体理由
+    const withDeny = new PermissionEngine({
+      mode: "plan",
+      rules: [parseRuleString("write", "deny", "config")],
+    });
+    expect(withDeny.evaluate(ctx({})).decision).toBe("deny");
+  });
+
+  it("setMode 就地切换模式，保留会话 allowAlways 规则", () => {
+    const e = new PermissionEngine();
+    e.addSessionRule(parseRuleString("write(src/a.ts)", "allow", "session"));
+    e.setMode("bypass");
+    expect(e.mode).toBe("bypass");
+    e.setMode("default");
+    expect(e.evaluate(ctx({})).decision).toBe("allow");
+  });
+
+  it("bash 规则按命令串匹配：* 跨 /（路径工具仍不跨）", () => {
+    const e = new PermissionEngine({
+      rules: [parseRuleString("Bash(git *)", "allow", "config")],
+    });
+    expect(
+      e.evaluate(ctx({ toolName: "bash", patterns: ["bash(git status)"] })).decision,
+    ).toBe("allow");
+    expect(
+      e.evaluate(ctx({ toolName: "bash", patterns: ["bash(git add src/app.ts)"] })).decision,
+    ).toBe("allow");
+    // deny 同样放宽，rm * 能拦住带路径的删除命令
+    const d = new PermissionEngine({
+      rules: [parseRuleString("Bash(rm *)", "deny", "config")],
+    });
+    expect(
+      d.evaluate({ toolName: "bash", isReadOnly: false, patterns: ["bash(rm -rf src/gen)"] }).decision,
+    ).toBe("deny");
+    // 非 bash 工具的路径规则维持 * 不跨 /
+    const w = new PermissionEngine({
+      rules: [parseRuleString("write(src/*.ts)", "allow", "config")],
+    });
+    expect(w.evaluate(ctx({ patterns: ["write(src/sub/a.ts)"] })).decision).toBe("ask");
+  });
+
   it("deny 规则压过 allow 规则与会话 allowAlways", () => {
     const e = new PermissionEngine({
       mode: "bypass",
@@ -83,6 +130,12 @@ describe("globToRegExp", () => {
     expect(globToRegExp("npm run test*").test("npm run test:unit")).toBe(true);
     expect(globToRegExp("a?c").test("abc")).toBe(true);
     expect(globToRegExp("a.c").test("abc")).toBe(false); // 点号按字面量
+  });
+
+  it("crossSlash：命令串匹配 * 跨 /", () => {
+    expect(globToRegExp("git *", { crossSlash: true }).test("git add src/app.ts")).toBe(true);
+    expect(globToRegExp("git *").test("git add src/app.ts")).toBe(false);
+    expect(globToRegExp("git **", { crossSlash: true }).test("git add src/app.ts")).toBe(true);
   });
 
   it("parseRuleString 解析", () => {

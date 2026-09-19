@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { z } from "zod";
+import { errorMessage } from "../../errors";
 import { defineTool } from "../tool";
 import {
   DEFAULT_BASH_TIMEOUT_MS,
@@ -7,6 +8,7 @@ import {
   killTree,
   pickShell,
   powershellSpec,
+  type ShellSpec,
 } from "./shell-utils";
 import { startBackgroundTask } from "./tasks";
 
@@ -47,13 +49,15 @@ export const bashTool = defineTool({
   },
 });
 
-async function runForeground(
+export async function runForeground(
   command: string,
   cwd: string,
   timeoutMs: number,
   signal: AbortSignal,
+  /** 测试注入：指定首选 shell（缺省 pickShell() 解析） */
+  initialSpec?: ShellSpec,
 ): Promise<{ content: string }> {
-  let spec = pickShell();
+  let spec = initialSpec ?? pickShell();
   let child: ChildProcess;
   try {
     child = spawn(spec.cmd, [...spec.args, command], {
@@ -81,6 +85,12 @@ async function runForeground(
   cappedStream(child.stderr, stderr);
 
   let timedOut = false;
+  /** bash 启动失败已切换 PowerShell 重试：原失败子进程的 close（Windows 携带 libuv errno
+   * 如 -4058）不得提前结算，否则重试输出被丢弃、工具恒报 -4058（桌面端 GUI PATH 无 bash
+   * 时整场会话所有命令瘫痪的根因） */
+  let fallbackInFlight = false;
+  /** PowerShell 兜底也启动失败时的可行动错误（替代静默 -1） */
+  let spawnFailure = "";
   const exitCode = await new Promise<number>((resolvePromise) => {
     let settled = false;
     let grace: NodeJS.Timeout | undefined;
@@ -105,7 +115,10 @@ async function runForeground(
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });
 
-    child.on("close", (code) => settle(code ?? -1));
+    child.on("close", (code) => {
+      if (fallbackInFlight) return; // 等待 PowerShell 重试的结果
+      settle(code ?? -1);
+    });
     child.on("error", (err) => {
       // bash 不在 PATH（Windows）：换 PowerShell 重试一次
       if (
@@ -113,6 +126,7 @@ async function runForeground(
         process.platform === "win32" &&
         spec.name === "bash"
       ) {
+        fallbackInFlight = true;
         spec = powershellSpec();
         const retry = spawn(spec.cmd, [...spec.args, command], {
           cwd,
@@ -128,7 +142,12 @@ async function runForeground(
           stderr.text = retryErr.text;
           settle(code ?? -1);
         });
-        retry.on("error", () => settle(-1));
+        retry.on("error", (err2) => {
+          spawnFailure =
+            `shell 启动失败（${(err2 as NodeJS.ErrnoException).code ?? errorMessage(err2)}）：bash 与 PowerShell 都不可用。` +
+            "请把 Git\\bin（bash）或 System32\\WindowsPowerShell（powershell.exe）加入 PATH 后重试";
+          settle(-1);
+        });
         return;
       }
       stderr.text += `\n[spawn error] ${String(err)}`;
@@ -138,7 +157,9 @@ async function runForeground(
 
   const merged =
     stdout.text + (stderr.text ? `\n[stderr]\n${stderr.text}` : "");
-  const tail = timedOut
+  const tail = spawnFailure
+    ? `[${spawnFailure}]`
+    : timedOut
     ? `[命令超时（>${timeoutMs}ms），进程树已终止]`
     : `[退出码 ${exitCode}，shell: ${spec.name}]`;
   return { content: `${merged}\n${tail}` };

@@ -19,12 +19,17 @@ import { Sidebar } from "./components/Sidebar";
 import { UsagePage } from "./components/UsagePage";
 import { createMockBridge } from "./mock-bridge";
 import {
+  addAttachments,
+  addQuote,
   addUserItem,
   applyEvent,
+  composeWithQuotes,
   decidePermission,
   emptyUiState,
+  fileAttachmentsFromPaths,
   itemsFromMessages,
   pushPermission,
+  textAttachmentFromPaste,
 } from "./state";
 
 export function App() {
@@ -53,6 +58,15 @@ export function App() {
 
   const panesRef = useRef(panes);
   panesRef.current = panes;
+
+  // 运行中的会话 id（分屏时可同时多个）：侧栏当前会话行首的圈圈动画依据
+  const runningIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of panes) {
+      if (p.sessionId && p.ui.running) ids.add(p.sessionId);
+    }
+    return ids;
+  }, [panes]);
 
   useEffect(() => {
     void bridge.info().then(setInfo);
@@ -109,15 +123,75 @@ export function App() {
   const send = async (idx: number, text: string) => {
     const pane = panesRef.current[idx];
     if (!pane) return;
-    mutatePane(idx, (p) => ({ ...p, ui: addUserItem(p.ui, text) }));
+    // 划选引用并入发送文本、附件走主进程标注块，二者发送后清空：
+    // 用户气泡与模型上下文各取所需，输入框回到空态
+    const full = composeWithQuotes(pane.ui.quotes, text);
+    const attachments = pane.ui.attachments.map((a) =>
+      a.kind === "file"
+        ? { name: a.name, kind: "file" as const, path: a.path }
+        : { name: a.name, kind: "text" as const, content: a.content },
+    );
+    mutatePane(idx, (p) => ({
+      ...p,
+      ui: addUserItem({ ...p.ui, quotes: [], attachments: [] }, full),
+    }));
     let sessionId = pane.sessionId;
     if (!sessionId) {
       const created = await bridge.newSession(pane.cwd);
       sessionId = created.sessionId;
       mutatePane(idx, (p) => ({ ...p, sessionId: created.sessionId, cwd: created.cwd }));
     }
-    await bridge.send(sessionId, text);
+    await bridge.send(sessionId, full, attachments);
   };
+
+  /** 划选引用追加到输入框：超限以内联错误提示呈现，不截断不挤掉已有引用 */
+  const addQuoteToPane = (idx: number, text: string) => {
+    const pane = panesRef.current[idx];
+    if (!pane) return;
+    const res = addQuote(pane.ui.quotes, text);
+    if (!res.ok) {
+      pushNotice(idx, "error", res.error);
+      return;
+    }
+    mutatePane(idx, (p) => ({ ...p, ui: { ...p.ui, quotes: res.quotes } }));
+  };
+
+  const removeQuote = (idx: number, id: string) =>
+    mutatePane(idx, (p) => ({
+      ...p,
+      ui: { ...p.ui, quotes: p.ui.quotes.filter((q) => q.id !== id) },
+    }));
+
+  /** + 附件：文件对话框多选，全有或全无（超限报错不部分接收） */
+  const pickAttachments = async (idx: number) => {
+    const pane = panesRef.current[idx];
+    if (!pane) return;
+    const paths = await bridge.pickFiles().catch(() => [] as string[]);
+    const res = addAttachments(pane.ui.attachments, fileAttachmentsFromPaths(paths));
+    if (!res.ok) {
+      pushNotice(idx, "error", res.error);
+      return;
+    }
+    mutatePane(idx, (p) => ({ ...p, ui: { ...p.ui, attachments: res.attachments } }));
+  };
+
+  /** 粘贴长文转附件：输入框不刷屏，完整内容随发送进入上下文 */
+  const pasteToAttachment = (idx: number, text: string) => {
+    const pane = panesRef.current[idx];
+    if (!pane) return;
+    const res = addAttachments(pane.ui.attachments, [textAttachmentFromPaste(text)]);
+    if (!res.ok) {
+      pushNotice(idx, "error", res.error);
+      return;
+    }
+    mutatePane(idx, (p) => ({ ...p, ui: { ...p.ui, attachments: res.attachments } }));
+  };
+
+  const removeAttachment = (idx: number, id: string) =>
+    mutatePane(idx, (p) => ({
+      ...p,
+      ui: { ...p.ui, attachments: p.ui.attachments.filter((a) => a.id !== id) },
+    }));
 
   const fork = async (idx: number, userTurn: number) => {
     const pane = panesRef.current[idx];
@@ -126,7 +200,7 @@ export function App() {
     mutatePane(idx, () => ({
       sessionId: res.sessionId,
       cwd: pane.cwd,
-      ui: { items: itemsFromMessages(res.messages), usage: null, running: false },
+      ui: { items: itemsFromMessages(res.messages), usage: null, running: false, runningSince: null, quotes: [], attachments: [] },
     }));
   };
 
@@ -141,7 +215,7 @@ export function App() {
     mutatePane(idx, () => ({
       sessionId: res.sessionId,
       cwd: pane.cwd,
-      ui: { items: itemsFromMessages(res.messages), usage: null, running: false },
+      ui: { items: itemsFromMessages(res.messages), usage: null, running: false, runningSince: null, quotes: [], attachments: [] },
     }));
   };
 
@@ -150,7 +224,7 @@ export function App() {
     mutatePane(activePane, () => ({
       sessionId: res.sessionId,
       cwd,
-      ui: { items: itemsFromMessages(res.messages), usage: null, running: false },
+      ui: { items: itemsFromMessages(res.messages), usage: null, running: false, runningSince: null, quotes: [], attachments: [] },
     }));
     setView("chat");
     setNavOpen(false);
@@ -238,7 +312,8 @@ export function App() {
     (c) => !c.id.startsWith("thinking-") || (info?.thinkingLevels ?? ALL_THINKING_LEVELS).length > 0,
   );
 
-  /** $ / @ 引用候选：技能走 info；插件 + 项目文件走 bridge（文件由主进程扫描 cwd） */
+  /** $ / @ / # 引用候选：技能走 info；插件 + 项目文件走 bridge（文件由主进程扫描 cwd）；
+   * # 会话取当前项目的会话列表（展开在主进程侧只解析本 cwd 的存储） */
   const resolveMentions = async (
     trigger: MentionTrigger,
     query: string,
@@ -256,6 +331,26 @@ export function App() {
         .map((s) => ({ kind: "skill" as const, name: s.name, detail: s.description, insert: s.name }));
     }
     const cwd = panesRef.current[activePane]?.cwd ?? info?.currentCwd ?? "";
+    if (trigger === "#") {
+      const out: MentionItem[] = [];
+      for (const p of info?.projects ?? []) {
+        if (p.cwd !== cwd) continue;
+        for (const s of p.sessions) {
+          if (out.length >= 12) break;
+          // 当前会话的历史本就在上下文里，不进候选
+          if (s.id === panesRef.current[activePane]?.sessionId) continue;
+          if (q === "" || s.title.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)) {
+            out.push({
+              kind: "session",
+              name: s.title || s.id,
+              detail: `${s.messageCount}条 · ${s.time}`,
+              insert: s.id,
+            });
+          }
+        }
+      }
+      return out;
+    }
     const files = await bridge.listProjectFiles(cwd, q, 20).catch(() => [] as string[]);
     const plugins = (info?.mcpServers ?? [])
       .filter((m) => q === "" || m.name.toLowerCase().includes(q))
@@ -352,6 +447,7 @@ export function App() {
       <Sidebar
         info={info}
         activeSessionId={panes[activePane]?.sessionId ?? null}
+        runningIds={runningIds}
         searchResults={searchResults}
         split={panes.length > 1}
         onSearch={(kw) => void doSearch(kw)}
@@ -376,6 +472,11 @@ export function App() {
             active={panes.length > 1 && idx === activePane}
             onActivate={() => setActivePane(idx)}
             onSend={(text) => void send(idx, text)}
+            onAddQuote={(t) => addQuoteToPane(idx, t)}
+            onRemoveQuote={(id) => removeQuote(idx, id)}
+            onPickAttachments={() => void pickAttachments(idx)}
+            onPasteToAttachment={(t) => pasteToAttachment(idx, t)}
+            onRemoveAttachment={(id) => removeAttachment(idx, id)}
             onAbort={() => bridge.abort(pane.sessionId ?? "")}
             onDecide={(askId, d: PermissionDecision) => {
               mutatePane(idx, (p) => ({ ...p, ui: decidePermission(p.ui, askId, d) }));
@@ -441,6 +542,7 @@ export function App() {
           {view === "plugins" && (
             <PluginsPage
               info={info}
+              bridge={bridge}
               onToggleMcp={(name, enabled) => void bridge.setMcpEnabled(name, enabled)}
               onAddMcp={(name, command, args, env) => bridge.addMcpServer(name, command, args, env)}
               onRemoveMcp={(name) => bridge.removeMcpServer(name)}

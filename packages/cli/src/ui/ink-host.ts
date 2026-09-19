@@ -138,6 +138,9 @@ export class InkHost implements AgentHost {
         break;
       case "done":
         this.flushStreaming();
+        // 中止解除挂起询问后弹窗会残留：done 时一律清掉（正常结束时本就为空）
+        this.state.permission = null;
+        this.permissionResolve = null;
         this.touch(true);
         break;
       case "turn_start":

@@ -14,7 +14,8 @@ export interface SkillDefinition {
   description: string;
   /** SKILL.md 正文（frontmatter 之后的指令内容） */
   body: string;
-  source: "user" | "project";
+  /** plugin 来源的技能名带命名空间（插件名:技能名） */
+  source: "user" | "project" | "plugin";
   path: string;
 }
 

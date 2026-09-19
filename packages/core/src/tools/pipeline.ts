@@ -1,5 +1,5 @@
 import type { ToolCall, ToolResultBlock } from "../types";
-import type { AgentHost } from "../host/port";
+import type { AgentHost, PermissionDecision } from "../host/port";
 import type { PermissionEngine } from "../permission/engine";
 import { extractRuleArg, type Rule } from "../permission/rules";
 import { isAbortedError, errorMessage } from "../errors";
@@ -23,6 +23,10 @@ export interface ToolExecutorOptions {
   maxOutputChars: number;
   hookPre?: HookFn;
   hookPost?: HookFn;
+  /** PermissionRequest hook：exit-2 语义 = 自动拒绝本次授权询问 */
+  hookPermissionRequest?: HookFn;
+  /** PostToolUseFailure hook：工具执行失败后触发（block 语义无效，仅通知） */
+  hookFailure?: HookFn;
 }
 
 /**
@@ -88,11 +92,25 @@ export class ToolExecutor {
       } else if (verdict.decision === "deny") {
         return fail(`操作被拒绝（${verdict.reason}）。请勿重复尝试，可向用户说明需求。`);
       } else {
-        const decision = await this.opts.host.requestPermission({
+        if (this.opts.hookPermissionRequest) {
+        const hooked = await this.opts.hookPermissionRequest({
           toolName: call.name,
           input: parsed.data,
-          patterns,
+          signal: ctx?.signal,
         });
+        if (hooked?.block) {
+          return fail(`被 PermissionRequest Hook 拒绝: ${hooked.reason ?? "无理由"}`);
+        }
+      }
+      const decision = await this.resolvePermission(
+          this.opts.host.requestPermission({
+            toolName: call.name,
+            input: parsed.data,
+            patterns,
+          }),
+          ctx?.signal,
+        );
+        if (ctx?.signal?.aborted) throw new AbortedSignalError();
         if (decision === "allowAlways") {
           const first = patterns[0];
           const rule: Rule = {
@@ -147,8 +165,45 @@ export class ToolExecutor {
         error: msg,
       });
       this.emitEnd(call, false, msg, startedAt);
+      if (this.opts.hookFailure) {
+        try {
+          await this.opts.hookFailure({
+            toolName: call.name,
+            input: call.input,
+            signal: undefined,
+          });
+        } catch {
+          // 失败通知 hook 自身出错不掩盖原始工具错误
+        }
+      }
       return fail(msg);
     }
+  }
+
+  /**
+   * 权限询问与中止信号竞速：用户中止时不再等宿主回答（交互弹窗可能永不响应），
+   * 按 deny 解除挂起，由调用方转成 AbortedSignalError 正常收尾，避免本轮悬挂。
+   */
+  private async resolvePermission(
+    pending: Promise<PermissionDecision>,
+    signal?: AbortSignal,
+  ): Promise<PermissionDecision> {
+    if (!signal) return pending;
+    if (signal.aborted) return "deny";
+    return new Promise<PermissionDecision>((resolve) => {
+      const onAbort = () => resolve("deny");
+      signal.addEventListener("abort", onAbort, { once: true });
+      pending.then(
+        (d) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(d);
+        },
+        () => {
+          signal.removeEventListener("abort", onAbort);
+          resolve("deny");
+        },
+      );
+    });
   }
 
   private emitEnd(

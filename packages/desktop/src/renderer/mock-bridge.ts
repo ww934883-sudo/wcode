@@ -146,6 +146,8 @@ export function createMockBridge(): WcodeBridge {
         command: [cfg.command, ...cfg.args].join(" "),
         connected: mcpConnected,
       })),
+      plugins: [],
+      marketplaces: [],
       providers: mockProviders.map((p) => ({ ...p, active: p.name === activeProvider })),
       stats: { sessionCount: sessions.size, messageCount, inputTokens: 4523, outputTokens: 921 },
       notice,
@@ -321,6 +323,7 @@ export function createMockBridge(): WcodeBridge {
     send: async (sessionId) => {
       void script(sessionId);
     },
+    pickFiles: async () => [],
     abort: async (sessionId) => {
       const s = sessions.get(sessionId);
       if (s) s.aborted = true;
@@ -493,6 +496,26 @@ export function createMockBridge(): WcodeBridge {
       delete servers[name];
       notice = `MCP ${name} 已删除（浏览器预览为模拟数据）`;
       bump();
+    },
+    // 插件管理（浏览器预览为模拟数据，仅提示）
+    listMarketplaceEntries: async () => [],
+    pluginAddMarketplace: async () => {
+      throw new Error("浏览器预览不支持插件市场，请使用桌面应用");
+    },
+    pluginRefreshMarketplace: async () => {
+      throw new Error("浏览器预览不支持插件市场，请使用桌面应用");
+    },
+    pluginRemoveMarketplace: async () => {
+      throw new Error("浏览器预览不支持插件市场，请使用桌面应用");
+    },
+    pluginInstall: async () => {
+      throw new Error("浏览器预览不支持安装插件，请使用桌面应用");
+    },
+    pluginUninstall: async () => {
+      throw new Error("浏览器预览不支持卸载插件，请使用桌面应用");
+    },
+    pluginSetEnabled: async () => {
+      throw new Error("浏览器预览不支持插件启停，请使用桌面应用");
     },
     listAutomations: async () => [...automations],
     addAutomation: async (spec: AutomationSpecInput) => {
