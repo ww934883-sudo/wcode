@@ -5,8 +5,8 @@
 - **browser-use** — 浏览器操作：远程调试端口驱动 Chrome/Edge，打开页面、执行 JS、
   点击填表、截图、读取渲染后内容（`scripts/cdp.js` 为零依赖 CDP 客户端，要求 Node ≥ 22）。
 - **computer-use** — 电脑控制：屏幕截图、鼠标点击、键盘输入、进程与窗口管理
-  （Windows PowerShell 脚本，macOS/Linux 给等价命令；PS1 已带 UTF-8 BOM，
-  不要用无 BOM 编辑器重存，否则中文会按 ANSI 解码炸掉）。
+  （Windows PowerShell 脚本 + macOS bash 脚本开箱即用，Linux 给等价命令；
+  PS1 已带 UTF-8 BOM，不要用无 BOM 编辑器重存，否则中文会按 ANSI 解码炸掉）。
 
 ## 机制
 
@@ -22,5 +22,7 @@
 - 新增内置插件：在本目录建插件包（`.zcode-plugin/plugin.json` + 组件目录），
   `packages/core/src/plugins/builtin.test.ts` 的 smoke 测试会自动覆盖到。
 - 发布新版本：改对应插件的 `version` 即可，播种器按版本号识别升级。
-- 打包发布（electron-builder 等）：把本目录配置为随包资源，并用
-  `WCODE_BUILTIN_PLUGINS_DIR` 指向其解包路径（开发态两者都会自动定位到仓库路径）。
+- 打包发布：桌面端 electron-builder 已把本目录配置为 extraResources
+  （`packages/desktop/electron-builder.yml`），打包后 runtime 自动走
+  `process.resourcesPath` 定位；开发态/CLI 自动定位仓库路径，也可用
+  `WCODE_BUILTIN_PLUGINS_DIR` 显式覆盖。

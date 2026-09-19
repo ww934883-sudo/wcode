@@ -9,3 +9,4 @@ evals-results/
 .tmp-ref/
 .zcode/
 shot*.png
+packages/desktop/release/

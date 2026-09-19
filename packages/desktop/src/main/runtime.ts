@@ -1054,18 +1054,28 @@ export class DesktopRuntime {
   }
 
   /**
-   * 内置插件根目录（仓库 packages/core/plugins-builtin）。
-   * 主进程经 esbuild 打包为 dist/main/index.cjs，__dirname 即 dist/main；
-   * 打包发布场景用 WCODE_BUILTIN_PLUGINS_DIR 指向随包资源。
+   * 内置插件根目录，按优先级三选一：
+   * 1. WCODE_BUILTIN_PLUGINS_DIR 环境变量（打包发布/测试可显式指向）；
+   * 2. 打包态 extraResources：<Resources>/plugins-builtin（electron-builder.yml 配置）；
+   * 3. 仓库开发态：主进程经 esbuild 打包为 dist/main/index.cjs，__dirname 即 dist/main，
+   *    向上回溯到 packages/ 后拼 core/plugins-builtin。
    */
   private builtinPluginsDir(): string | null {
     const env = process.env.WCODE_BUILTIN_PLUGINS_DIR;
     if (env) return env;
-    const candidate = path.join(__dirname, "..", "..", "..", "core", "plugins-builtin");
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch {
-      // ignore
+    const candidates = [
+      path.join(
+        (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath ?? "",
+        "plugins-builtin",
+      ),
+      path.join(__dirname, "..", "..", "..", "core", "plugins-builtin"),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate)) return candidate;
+      } catch {
+        // ignore
+      }
     }
     return null;
   }

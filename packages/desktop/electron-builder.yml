@@ -1,0 +1,39 @@
+# electron-builder 打包配置。渲染层/主进程已由 vite+esbuild 预打包进 dist
+# （workspace 依赖内联），故 files 只收 dist，不需要 node_modules 进安装包。
+appId: com.wcode.desktop
+productName: wcode
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+asar: true
+npmRebuild: false
+# 内置插件随包分发：打包后由 runtime 走 process.resourcesPath 解析（见 runtime.ts builtinPluginsDir）
+extraResources:
+  - from: ../core/plugins-builtin
+    to: plugins-builtin
+    filter:
+      - "**/*"
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  # 开发分发：不签名（用户首启需 `xattr -cr /Applications/wcode.app` 去隔离属性）。
+  # 正式分发：配 CSC_LINK / CSC_KEY_PASSWORD（可选 APPLE_ID 等）环境变量后删除 identity 行。
+  identity: null
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

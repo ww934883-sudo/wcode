@@ -22,6 +22,20 @@ pnpm --filter @wcode/desktop build && pnpm --filter @wcode/desktop preview
 
 强制演示模式（CI 冒烟 / 不消耗 token）：`WCODE_DESKTOP_DEMO=1 pnpm desktop`
 
+## 打包分发（electron-builder）
+
+```bash
+pnpm --filter @wcode/desktop dist:dir   # 免安装目录包（最快，验证打包链路）
+pnpm --filter @wcode/desktop dist:mac   # macOS dmg + zip（arm64/x64；dmg 需在 macOS 上构建）
+pnpm --filter @wcode/desktop dist:win   # Windows NSIS 安装器（x64）
+```
+
+- 产物在 `packages/desktop/release/`（已 gitignore）；内置插件经 extraResources
+  随包分发（`electron-builder.yml`），runtime 打包态自动走 `process.resourcesPath` 定位。
+- **未签名**：mac 产物首启需 `xattr -cr /Applications/wcode.app` 去隔离；
+  正式分发配 `CSC_LINK` / `CSC_KEY_PASSWORD`（可选 APPLE_ID 公证）后删掉
+  `electron-builder.yml` 里 mac 的 `identity: null` 行。自动更新通道未建。
+
 ## 已实现能力（v2）
 
 - **多会话/多项目**：侧栏按工作目录分组，新建/切换/续聊；jsonl 存储（真实模式与
@@ -63,4 +77,4 @@ pnpm --filter @wcode/desktop build && pnpm --filter @wcode/desktop preview
 - 素材库（图片生成）与生成式 UI 未实现——需要媒体类 provider 端口，规划中。
 - 上下文窗口 / 权限模式 / 助理切换对**新会话**生效；模型选择即时热切。
 - SQLite 存储未接（Electron 内置 Node 与 `node:sqlite` 版本待对齐），当前 jsonl。
-- 打包（electron-builder NSIS）与自动更新通道未配。
+- 签名/公证未配（mac 产物未签名，win 无证书），自动更新通道未建；打包链路已通（见上）。

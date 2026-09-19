@@ -121,7 +121,7 @@ pnpm eval                         # 评测集（需 provider，见文末）
 - **市场与安装**：`/plugin install <名>[@市场]`，市场来源支持 GitHub（`owner/repo`）、git url、本地目录、zip url（sha256 校验）；`/plugin list|uninstall|enable|disable`，`/plugin market list|add|refresh|remove`；安装到 `~/.wcode/plugins/cache/<市场>/<插件>/<版本>/`。
 - **内置插件**（随应用分发，启动时播种到本机缓存，升级自动重播、卸载过的不装回 `plugins.blockedBuiltins`）：
   - **browser-use** —— 远程调试端口驱动 Chrome/Edge：打开页面、执行 JS、点击填表、截图、读取渲染后内容（零依赖 CDP 客户端）。
-  - **computer-use** —— 屏幕截图、鼠标点击、键盘输入、窗口与进程管理（Windows PowerShell 脚本 + macOS/Linux 等价命令）。
+  - **computer-use** —— 屏幕截图、鼠标点击、键盘输入、窗口与进程管理（Windows PowerShell 与 macOS bash 脚本开箱即用，Linux 给等价命令；mac 首用需授权屏幕录制与辅助功能）。
 - **变量替换**：插件组件正文可用 `${WCODE_PLUGIN_ROOT}`（插件根目录）与 `${WCODE_PROJECT_DIR}`（当前项目），兼容 `${CLAUDE_PLUGIN_ROOT}` 等别名。
 
 ### 会话与存储
@@ -164,6 +164,7 @@ wcode daemon --tick                       # 只跑一轮（挂 Windows 计划任
 - **插件页**：MCP 服务器启停与新增、技能/子 Agent 清单、插件与市场管理（安装/卸载/启停）。
 - **用量页**：项目聚合 token + 费用估算；**设置页**：供应商管理、API key 录入（渲染层永不接触明文）、连通性测试。
 - **演示模式**：无 API key 自动进入（脚本化模型输出 + 真实工具/权限/落盘），`WCODE_DESKTOP_DEMO=1` 强制。
+- **跨平台打包**：`pnpm --filter @wcode/desktop dist:mac`（dmg+zip，arm64/x64）/ `dist:win`（NSIS）；未签名（mac 首启需 `xattr -cr` 去隔离），正式分发配签名证书。
 - 安全基线：`contextIsolation + sandbox + nodeIntegration:false`；渲染层与主进程经 v2 桥接协议（类型共享，三条事件流）。
 
 ## 配置参考
