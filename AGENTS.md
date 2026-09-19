@@ -47,6 +47,7 @@ core 通过五个接缝与外界解耦，新增能力优先考虑"放进哪个�
 
 ## 提交与回归
 
+- **每完成一批代码改动必须立即 commit**（跑完回归就提，不积攒工作区改动），保证任意时点可回滚找回。
 - 提交信息：`M1-Wx: 中文摘要`（或里程碑内小结的等价形式），中文描述改动本质。
 - 任何改动提交前跑回归三件套：`pnpm typecheck && pnpm lint:deps && pnpm test`。
 - 涉及模型行为的改动加跑 `pnpm eval`，用 `--compare` 对比基线（基线报告在 `packages/evals/evals-results/`，已被 .gitignore 排除）。
